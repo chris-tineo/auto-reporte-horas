@@ -9,3 +9,6 @@ __pycache__/
 tools_*.py
 inspect_dump.txt
 *_shot.png
+
+# Resumen semanal de tareas (datos operativos, puede ser sensible)
+week_note.txt

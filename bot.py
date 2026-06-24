@@ -2,23 +2,32 @@
 """
 timesheet-bot — Rutina genérica multi-empresa para llenado de horas.
 
-Soporta dos tipos de autenticación por empresa:
+Autenticación por empresa:
   - "password": login desatendido con usuario/contraseña desde .env
   - "session":  reutiliza una sesión guardada (storageState) para empresas con MFA
 
+Flujos de llenado (cfg["flow"]):
+  - "simple" (default): un dropdown de proyecto + uno o varios campos de horas + save.
+  - "modal_entries":    abre un modal por entrada, llena campos, "add to list" y al
+                        final (o por día) hace "save". Las observaciones y los días
+                        trabajados salen de week_note.txt.
+
 Uso:
-  python bot.py --company empresa_a            # corre una empresa
-  python bot.py                                # corre todas las activas
-  python bot.py --company empresa_b --login    # login manual para guardar sesión (MFA)
-  python bot.py --company empresa_a --dry-run   # navega y rellena pero NO hace submit
+  python bot.py --company bertoni --login          # login manual (MFA) → guarda sesión
+  python bot.py --company bertoni --dry-run        # llena el modal y captura, NO guarda
+  python bot.py --company bertoni                  # semana ISO actual (lun-vie)
+  python bot.py --company bertoni --month 2026-06  # todo junio
+  python bot.py --company bertoni --week 2026-W26  # una semana ISO puntual
 """
 
 import argparse
+import calendar
 import os
+import re
 import sys
 import glob
 import logging
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 import yaml
@@ -29,8 +38,11 @@ BASE = Path(__file__).parent
 COMPANIES_DIR = BASE / "companies"
 AUTH_DIR = BASE / "auth"
 LOGS_DIR = BASE / "logs"
+NOTE_FILE_DEFAULT = BASE / "week_note.txt"
 
 load_dotenv(BASE / ".env")
+
+WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +99,95 @@ def get_credential(company: str, kind: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# week_note.txt — observaciones y días trabajados por semana
+# ---------------------------------------------------------------------------
+def _parse_worked(spec: str) -> set[int]:
+    """'Mon-Fri' / 'Mon,Wed,Fri' / 'none' -> set de weekday ints (Mon=0..Sun=6)."""
+    spec = spec.strip().lower()
+    if spec in ("none", "-", ""):
+        return set()
+    out: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            a, b = (p.strip() for p in part.split("-", 1))
+            if a in WEEKDAYS and b in WEEKDAYS:
+                for i in range(WEEKDAYS[a], WEEKDAYS[b] + 1):
+                    out.add(i)
+        elif part in WEEKDAYS:
+            out.add(WEEKDAYS[part])
+    return out
+
+
+def parse_week_note(path: Path) -> dict:
+    """Lee week_note.txt -> {company: {(year, isoweek): {'worked': set, 'obs': str}}}.
+
+    Formato:
+        [bertoni]
+        week 2026-W23 | worked: Mon-Fri | obs: Texto de la semana
+    """
+    data: dict = {}
+    if not path.exists():
+        return data
+    company = None
+    line_re = re.compile(
+        r"^week\s+(\d{4})-W(\d{1,2})\s*\|\s*worked:\s*([^|]*)\|\s*obs:\s*(.*)$",
+        re.IGNORECASE,
+    )
+    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            company = line[1:-1].strip().lower()
+            data.setdefault(company, {})
+            continue
+        m = line_re.match(line)
+        if m and company:
+            year, week, worked, obs = m.groups()
+            data[company][(int(year), int(week))] = {
+                "worked": _parse_worked(worked),
+                "obs": obs.strip(),
+            }
+    return data
+
+
+def compute_targets(company: str, note: dict, start: date, end: date,
+                    log: logging.Logger) -> list[tuple[date, str]]:
+    """Lista (fecha, observación) para los días trabajados en [start, end]."""
+    weeks = note.get(company, {})
+    targets: list[tuple[date, str]] = []
+    d = start
+    while d <= end:
+        if d.weekday() < 5:  # lun-vie
+            y, w, _ = d.isocalendar()
+            entry = weeks.get((y, w))
+            if entry is None:
+                log.warning(f"{d} (semana {y}-W{w}): sin info en week_note.txt → se omite.")
+            elif d.weekday() in entry["worked"]:
+                targets.append((d, entry["obs"]))
+        d += timedelta(days=1)
+    return targets
+
+
+# ---------------------------------------------------------------------------
+# Rango de fechas (scope CLI)
+# ---------------------------------------------------------------------------
+def scope_dates(month: str | None, week: str | None) -> tuple[date, date]:
+    if month:
+        y, m = (int(x) for x in month.split("-"))
+        return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
+    if week:
+        y, w = (int(x) for x in week.upper().split("-W"))
+        monday = date.fromisocalendar(y, w, 1)
+        return monday, monday + timedelta(days=4)
+    # default: semana ISO actual (lun-vie)
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    return monday, monday + timedelta(days=4)
+
+
+# ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
 def session_path(company: str) -> Path:
@@ -130,36 +231,35 @@ def manual_login_flow(company: str):
         browser.close()
 
 
-# ---------------------------------------------------------------------------
-# Rellenado de horas
-# ---------------------------------------------------------------------------
-def fill_timesheet(page, cfg: dict, log: logging.Logger, dry_run: bool):
-    sel = cfg["selectors"]
-    defaults = cfg.get("defaults", {})
-
-    # Asegurar que estamos en la página de horas (por si la sesión expiró
-    # y nos redirigió al login).
-    page.goto(cfg["url"], wait_until="domcontentloaded")
+def _check_session(page, cfg: dict):
     if cfg.get("login_marker") and page.locator(cfg["login_marker"]).count() > 0:
         raise RuntimeError(
             "Parece que la sesión expiró (se detectó la pantalla de login). "
             f"Vuelve a correr: python bot.py --company {cfg['_name']} --login"
         )
 
+
+# ---------------------------------------------------------------------------
+# Flujo simple (un proyecto + horas + save)
+# ---------------------------------------------------------------------------
+def fill_timesheet(page, cfg: dict, log: logging.Logger, dry_run: bool):
+    sel = cfg["selectors"]
+    defaults = cfg.get("defaults", {})
+
+    page.goto(cfg["url"], wait_until="domcontentloaded")
+    _check_session(page, cfg)
     log.info("Rellenando horas…")
 
     if sel.get("project_dropdown") and defaults.get("project"):
         page.select_option(sel["project_dropdown"], defaults["project"])
 
     if sel.get("hours_field") and defaults.get("hours") is not None:
-        # Para timesheets de varios días, hours_field puede ser una lista de selectores.
         fields = sel["hours_field"]
         if isinstance(fields, str):
             fields = [fields]
         for f in fields:
             page.fill(f, str(defaults["hours"]))
 
-    # Pasos extra opcionales (descripción, categoría, etc.)
     for step in cfg.get("extra_fields", []):
         page.fill(step["selector"], str(step["value"]))
 
@@ -176,13 +276,84 @@ def fill_timesheet(page, cfg: dict, log: logging.Logger, dry_run: bool):
 
 
 # ---------------------------------------------------------------------------
+# Flujo modal_entries (modal por entrada → add to list → save)
+# ---------------------------------------------------------------------------
+def _fill_modal_field(page, field: dict, ctx: dict):
+    sel = field["selector"]
+    kind = field.get("kind", "fill")
+    val = str(field.get("value", ""))
+    for k, v in ctx.items():
+        val = val.replace("${" + k + "}", v)
+    if kind == "select":
+        page.select_option(sel, val)
+    else:  # 'fill' y 'date' (input[type=date] espera YYYY-MM-DD)
+        page.fill(sel, val)
+
+
+def fill_modal_entries(page, cfg: dict, log: logging.Logger, dry_run: bool,
+                       targets: list[tuple[date, str]]):
+    me = cfg["modal_entries"]
+    page.goto(cfg["url"], wait_until="domcontentloaded")
+    page.wait_for_load_state("networkidle")
+    _check_session(page, cfg)
+
+    if not targets:
+        log.warning("No hay días a llenar (revisa week_note.txt / rango). Nada que hacer.")
+        return
+
+    log.info(f"{len(targets)} día(s) a procesar: {targets[0][0]} … {targets[-1][0]}")
+
+    for d, note in targets:
+        iso = d.isoformat()
+        if me.get("date_register"):
+            page.fill(me["date_register"], iso)
+            page.wait_for_timeout(700)
+
+        page.click(me["open_modal"])
+        page.wait_for_selector(me["modal"], state="visible", timeout=15000)
+        page.wait_for_timeout(400)
+
+        ctx = {"date": iso, "note": note or ""}
+        for field in me["fields"]:
+            _fill_modal_field(page, field, ctx)
+        log.info(f"{iso}: modal lleno (8h · obs={note!r}).")
+
+        if dry_run:
+            shot = LOGS_DIR / f"{cfg['_name']}_dry_{iso}.png"
+            page.screenshot(path=str(shot))
+            page.click(me["cancel"])
+            page.wait_for_timeout(500)
+            log.info(f"{iso}: DRY-RUN, modal cerrado sin guardar. Captura: {shot.name}")
+            continue
+
+        page.click(me["add_to_list"])
+        page.wait_for_timeout(900)
+        if me.get("save_per_day"):
+            page.click(me["save"])
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(800)
+            log.info(f"{iso}: guardado (Save).")
+
+    if not dry_run and not me.get("save_per_day"):
+        page.click(me["save"])
+        page.wait_for_load_state("networkidle")
+        log.info("Save final hecho.")
+
+
+# ---------------------------------------------------------------------------
 # Runner por empresa
 # ---------------------------------------------------------------------------
-def run_company(company: str, dry_run: bool = False) -> bool:
+def run_company(company: str, dry_run: bool, note: dict,
+                start: date, end: date) -> bool:
     log = setup_logger(company)
     try:
         cfg = load_config(company)
         auth_mode = cfg.get("auth", "password")
+        flow = cfg.get("flow", "simple")
+
+        targets: list[tuple[date, str]] = []
+        if flow == "modal_entries":
+            targets = compute_targets(company, note, start, end, log)
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=cfg.get("headless", True))
@@ -201,7 +372,10 @@ def run_company(company: str, dry_run: bool = False) -> bool:
                 page = context.new_page()
                 do_password_login(page, cfg, log)
 
-            fill_timesheet(page, cfg, log, dry_run)
+            if flow == "modal_entries":
+                fill_modal_entries(page, cfg, log, dry_run, targets)
+            else:
+                fill_timesheet(page, cfg, log, dry_run)
             browser.close()
 
         log.info("✓ OK")
@@ -247,7 +421,11 @@ def main():
     ap.add_argument("--login", action="store_true",
                     help="Login manual para guardar sesión (empresas con MFA).")
     ap.add_argument("--dry-run", action="store_true",
-                    help="Rellena pero NO hace submit.")
+                    help="Llena pero NO guarda (captura el modal por día).")
+    ap.add_argument("--month", help="Rango = todo el mes, formato YYYY-MM.")
+    ap.add_argument("--week", help="Rango = una semana ISO, formato YYYY-Www.")
+    ap.add_argument("--note-file", default=str(NOTE_FILE_DEFAULT),
+                    help="Ruta del week_note.txt (default: ./week_note.txt).")
     args = ap.parse_args()
 
     if args.login:
@@ -260,8 +438,12 @@ def main():
     if not companies:
         sys.exit("No hay empresas configuradas en companies/.")
 
-    print(f"[{datetime.now():%Y-%m-%d %H:%M}] Empresas a procesar: {', '.join(companies)}")
-    results = {c: run_company(c, dry_run=args.dry_run) for c in companies}
+    start, end = scope_dates(args.month, args.week)
+    note = parse_week_note(Path(args.note_file))
+
+    print(f"[{datetime.now():%Y-%m-%d %H:%M}] Rango {start} → {end} | "
+          f"Empresas: {', '.join(companies)}{' (DRY-RUN)' if args.dry_run else ''}")
+    results = {c: run_company(c, args.dry_run, note, start, end) for c in companies}
 
     ok = [c for c, r in results.items() if r]
     fail = [c for c, r in results.items() if not r]

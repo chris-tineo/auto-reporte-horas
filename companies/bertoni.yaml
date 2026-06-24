@@ -1,31 +1,38 @@
-# Bertoni — login SSO de Microsoft (Azure AD). Usa sesión persistida.
+# Bertoni — app ASP.NET Zero "Time Management" (v5.5.0.0). Login SSO Office 365.
 # 1) Una vez:  python bot.py --company bertoni --login   (login + MFA a mano)
-# 2) Luego corre normal y reutiliza auth/bertoni_state.json hasta que expire.
+# 2) Luego:    python bot.py --company bertoni            (semana ISO actual)
+#              python bot.py --company bertoni --month 2026-06   (todo un mes)
 #
-# Credenciales: NO van en .env (es SSO/MFA). La sesión vive en auth/bertoni_state.json.
+# Las observaciones y los días trabajados de cada semana salen de week_note.txt
+# (sección [bertoni]). Las constantes (8h, proyecto, etc.) viven aquí.
 
 name: bertoni
 active: true
 auth: session
-headless: false              # false mientras configuramos; true cuando esté validado
+headless: false              # false mientras validamos; true cuando esté estable
+url: "https://bstmprod.azurewebsites.net/TimeManagementEntries"
 
-# OJO: idealmente apunta a la PÁGINA DE TIMESHEET (no al login). Al entrar sin
-# sesión, la app redirige al login SSO. Por ahora ponemos la URL de login que
-# diste; al validar tras --login, cambiar a la URL real del formulario de horas.
-url: "https://bstmprod.azurewebsites.net/Account/Login"
-
-# Selector que SOLO existe en la pantalla de login (detecta sesión expirada).
-# Confirmado contra la página real: el form de login de la app tiene id LoginForm.
-# (El botón de SSO es #OpenIdConnect / "Log-In with Office 365".)
+# Form de login de la app (solo existe deslogueado) → detecta sesión expirada.
 login_marker: "#LoginForm"
 
-selectors:
-  # TODO: inspeccionar el timesheet real DESPUÉS del primer --login.
-  # Estos campos están detrás del SSO; no se pueden ver sin sesión.
-  project_dropdown: "TODO"
-  hours_field: "TODO"        # string, o lista de selectores (un input por día)
-  save: "TODO"               # OJO: este hace el submit real
+flow: modal_entries
 
-defaults:
-  hours: 8
-  project: "TODO"            # value de la opción del dropdown
+modal_entries:
+  date_register: "#dateRegister"                  # fecha del día arriba (página "per day")
+  open_modal: "#manualTmeCreateOpenModalButton"   # botón "Create"
+  modal: "#TimeManagementEntryCreateModal"        # modal "Create New Time Management Entry"
+  add_to_list: "#TimeManagementEntryCreateModal .save-button"   # "Add To List"
+  cancel: "#TimeManagementEntryCreateModal .close-button"       # "Cancel" (usado en dry-run)
+  save: "#save"                                    # OJO: botón verde "Save" = submit real
+  save_per_day: true                              # guarda al cerrar cada día
+
+  # Campos del modal. ${date} = fecha ISO del día, ${note} = observación de la semana.
+  fields:
+    - { selector: "#newTmeDate",         kind: date,   value: "${date}" }
+    - { selector: "#newTmeProject",      kind: select, value: "95" }     # KPI Partners Inc
+    - { selector: "#newTmeHours",        kind: fill,   value: "8" }
+    - { selector: "#newTmeMinutes",      kind: fill,   value: "0" }
+    - { selector: "#newTmeIssueNumber",  kind: fill,   value: "0" }
+    - { selector: "#newTmeIssueType",    kind: select, value: "2" }      # Task
+    - { selector: "#newTmeHourType",     kind: select, value: "1" }      # Development
+    - { selector: "#newTmeObservations", kind: fill,   value: "${note}" }
