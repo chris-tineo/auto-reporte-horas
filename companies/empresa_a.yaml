@@ -1,0 +1,29 @@
+# Empresa con login usuario/contraseña (SIN MFA) — corrida 100% desatendida.
+# Credenciales en .env como:  EMPRESA_A_USER=...   EMPRESA_A_PASS=...
+
+name: empresa_a
+active: true              # ponlo en false para excluirla de la corrida "todas"
+auth: password
+headless: true            # false si quieres ver el navegador mientras depuras
+url: "https://intranet.empresa-a.com/timesheet"
+
+# Selector que SOLO aparece en la pantalla de login.
+# Sirve para detectar si la sesión expiró. (En password no es crítico.)
+login_marker: "#login-form"
+
+selectors:
+  user: "#username"
+  pass: "#password"
+  submit: "button[type=submit]"
+  project_dropdown: "#project"        # quita si no aplica
+  hours_field: "input[name='hours']"  # puede ser una lista (ver empresa_b)
+  save: "button#save-timesheet"       # OJO: este es el que hace submit real
+
+defaults:
+  hours: 8
+  project: "PROJ-123"                 # valor (value) de la opción del dropdown
+
+# Campos adicionales opcionales (descripción, categoría, etc.)
+extra_fields:
+  - selector: "textarea#notes"
+    value: "Regular work"

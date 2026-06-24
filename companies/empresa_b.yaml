@@ -1,0 +1,28 @@
+# Empresa con MFA (SSO Azure AD / Okta) — usa sesión persistida.
+# 1) Una vez:  python bot.py --company empresa_b --login   (login + MFA a mano)
+# 2) Luego corre normal y reutiliza auth/empresa_b_state.json hasta que expire.
+
+name: empresa_b
+active: true
+auth: session
+headless: true
+url: "https://timesheet.empresa-b.com/week"
+
+# IMPORTANTE: selector que SOLO existe en la pantalla de login del SSO.
+# Si aparece, el bot asume que la sesión expiró y te pide re-loguear.
+login_marker: "input[type=email][name=loginfmt]"   # ej. Azure AD
+
+selectors:
+  # Timesheet semanal: un input por día (lunes a viernes).
+  hours_field:
+    - "input[name='mon_hours']"
+    - "input[name='tue_hours']"
+    - "input[name='wed_hours']"
+    - "input[name='thu_hours']"
+    - "input[name='fri_hours']"
+  project_dropdown: "#projectSelect"
+  save: "button[data-testid='submit-week']"
+
+defaults:
+  hours: 8
+  project: "INTERNAL-OPS"
