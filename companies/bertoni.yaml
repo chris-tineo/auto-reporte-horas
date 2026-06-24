@@ -1,0 +1,31 @@
+# Bertoni — login SSO de Microsoft (Azure AD). Usa sesión persistida.
+# 1) Una vez:  python bot.py --company bertoni --login   (login + MFA a mano)
+# 2) Luego corre normal y reutiliza auth/bertoni_state.json hasta que expire.
+#
+# Credenciales: NO van en .env (es SSO/MFA). La sesión vive en auth/bertoni_state.json.
+
+name: bertoni
+active: true
+auth: session
+headless: false              # false mientras configuramos; true cuando esté validado
+
+# OJO: idealmente apunta a la PÁGINA DE TIMESHEET (no al login). Al entrar sin
+# sesión, la app redirige al login SSO. Por ahora ponemos la URL de login que
+# diste; al validar tras --login, cambiar a la URL real del formulario de horas.
+url: "https://bstmprod.azurewebsites.net/Account/Login"
+
+# Selector que SOLO existe en la pantalla de login (detecta sesión expirada).
+# Confirmado contra la página real: el form de login de la app tiene id LoginForm.
+# (El botón de SSO es #OpenIdConnect / "Log-In with Office 365".)
+login_marker: "#LoginForm"
+
+selectors:
+  # TODO: inspeccionar el timesheet real DESPUÉS del primer --login.
+  # Estos campos están detrás del SSO; no se pueden ver sin sesión.
+  project_dropdown: "TODO"
+  hours_field: "TODO"        # string, o lista de selectores (un input por día)
+  save: "TODO"               # OJO: este hace el submit real
+
+defaults:
+  hours: 8
+  project: "TODO"            # value de la opción del dropdown

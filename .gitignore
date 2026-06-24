@@ -4,3 +4,8 @@ logs/*.log
 __pycache__/
 *.pyc
 .venv/
+
+# Helpers e inspección de un solo uso (no parte del bot)
+tools_*.py
+inspect_dump.txt
+*_shot.png
