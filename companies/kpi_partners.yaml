@@ -7,7 +7,7 @@
 # credenciales en .env (KPI_PARTNERS_USER/PASS) lo paso a auth: password.
 
 name: kpi_partners
-active: false                # activar cuando esté validado
+active: true                 # validado (login password + grilla + submit)
 auth: password               # login desatendido (BigTime, sin MFA)
 headless: false
 url: "https://iq.bigtime.net/BigTime/Entry2#/timesheet/weekly"
@@ -36,3 +36,4 @@ weekly_grid:
   week_prev: "xpath=//a[contains(@class,'picker-text')]/preceding-sibling::a[contains(@class,'icon-container')][1]"
   week_next: "xpath=//a[contains(@class,'picker-text')]/following-sibling::a[contains(@class,'icon-container')][1]"
   save: "button.btn-primary:has-text('Save')"   # botón Save de la fila (NO Submit Hours)
+  submit_open: "a:has-text('Submit Hours')"     # abre el modal "Submit Timesheets" (solo con --submit)

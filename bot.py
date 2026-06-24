@@ -394,8 +394,40 @@ def _goto_week(page, wg: dict, target_sunday: date, log: logging.Logger):
     raise RuntimeError(f"No se pudo navegar a la semana {target_sunday}")
 
 
+def _submit_week(page, wg: dict, sun: date, log: logging.Logger):
+    """Abre el modal 'Submit Timesheets' y envía SOLO la semana `sun`.
+    Guarda: marca únicamente el período cuyo rango empieza en `sun`; si no
+    aparece exactamente ese período, NO envía nada."""
+    expected = f"{sun.month}/{sun.day}/{sun.strftime('%y')}"  # ej. 6/21/26
+    page.locator(wg["submit_open"]).first.click()
+    page.wait_for_selector(".modal:visible", timeout=15000)
+    page.wait_for_timeout(1000)
+    modal = page.locator(".modal:visible").first
+    rows = modal.locator("tbody tr")
+    target = 0
+    for i in range(rows.count()):
+        r = rows.nth(i)
+        cb = r.locator("input[type=checkbox]").first
+        if expected in r.inner_text():
+            if not cb.is_checked():
+                cb.check()
+            target += 1
+        elif cb.is_checked():
+            cb.uncheck()
+    if target != 1:
+        log.warning(f"Submit {sun}: no se halló exactamente el período {expected} "
+                    f"(coincidencias={target}); NO se envió.")
+        modal.locator("xpath=.//button[contains(.,'Submit Hours')]").first  # no-op
+        page.keyboard.press("Escape")
+        return
+    modal.locator("xpath=.//button[contains(.,'Submit Hours')]").first.click()
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(1500)
+    log.info(f"semana {sun}: Submit enviado (período {expected}).")
+
+
 def fill_weekly_grid(page, cfg: dict, log: logging.Logger, dry_run: bool,
-                     targets: list[tuple[date, str]]):
+                     targets: list[tuple[date, str]], submit: bool = False):
     wg = cfg["weekly_grid"]
     hours = str(wg.get("hours", "8"))
     page.goto(cfg["url"], wait_until="networkidle")
@@ -444,14 +476,16 @@ def fill_weekly_grid(page, cfg: dict, log: logging.Logger, dry_run: bool,
             page.locator(wg["save"]).first.click()
             page.wait_for_load_state("networkidle")
             page.wait_for_timeout(1800)
-            log.info(f"semana {sun}: Save hecho (sin Submit).")
+            log.info(f"semana {sun}: Save hecho.")
+            if submit:
+                _submit_week(page, wg, sun, log)
 
 
 # ---------------------------------------------------------------------------
 # Runner por empresa
 # ---------------------------------------------------------------------------
 def run_company(company: str, dry_run: bool, note: dict,
-                start: date, end: date) -> bool:
+                start: date, end: date, submit: bool = False) -> bool:
     log = setup_logger(company)
     try:
         cfg = load_config(company)
@@ -482,7 +516,7 @@ def run_company(company: str, dry_run: bool, note: dict,
             if flow == "modal_entries":
                 fill_modal_entries(page, cfg, log, dry_run, targets)
             elif flow == "weekly_grid":
-                fill_weekly_grid(page, cfg, log, dry_run, targets)
+                fill_weekly_grid(page, cfg, log, dry_run, targets, submit)
             else:
                 fill_timesheet(page, cfg, log, dry_run)
             browser.close()
@@ -531,6 +565,8 @@ def main():
                     help="Login manual para guardar sesión (empresas con MFA).")
     ap.add_argument("--dry-run", action="store_true",
                     help="Llena pero NO guarda (captura el modal por día).")
+    ap.add_argument("--submit", action="store_true",
+                    help="weekly_grid: tras Save, envía la semana (Submit Hours). Opt-in.")
     ap.add_argument("--month", help="Rango = todo el mes, formato YYYY-MM.")
     ap.add_argument("--week", help="Rango = una semana ISO, formato YYYY-Www.")
     ap.add_argument("--from", dest="frm", help="Inicio del rango, YYYY-MM-DD.")
@@ -554,7 +590,8 @@ def main():
 
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] Rango {start} → {end} | "
           f"Empresas: {', '.join(companies)}{' (DRY-RUN)' if args.dry_run else ''}")
-    results = {c: run_company(c, args.dry_run, note, start, end) for c in companies}
+    results = {c: run_company(c, args.dry_run, note, start, end, args.submit)
+               for c in companies}
 
     ok = [c for c, r in results.items() if r]
     fail = [c for c, r in results.items() if not r]
