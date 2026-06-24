@@ -42,6 +42,13 @@ NOTE_FILE_DEFAULT = BASE / "week_note.txt"
 
 load_dotenv(BASE / ".env")
 
+# La consola de Windows (cp1252) no codifica acentos/símbolos del log → forzar UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 
@@ -173,7 +180,12 @@ def compute_targets(company: str, note: dict, start: date, end: date,
 # ---------------------------------------------------------------------------
 # Rango de fechas (scope CLI)
 # ---------------------------------------------------------------------------
-def scope_dates(month: str | None, week: str | None) -> tuple[date, date]:
+def scope_dates(month: str | None, week: str | None,
+                frm: str | None = None, to: str | None = None) -> tuple[date, date]:
+    if frm or to:  # rango explícito (o un solo día si solo se da uno)
+        f = date.fromisoformat(frm or to)
+        t = date.fromisoformat(to or frm)
+        return f, t
     if month:
         y, m = (int(x) for x in month.split("-"))
         return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
@@ -424,6 +436,8 @@ def main():
                     help="Llena pero NO guarda (captura el modal por día).")
     ap.add_argument("--month", help="Rango = todo el mes, formato YYYY-MM.")
     ap.add_argument("--week", help="Rango = una semana ISO, formato YYYY-Www.")
+    ap.add_argument("--from", dest="frm", help="Inicio del rango, YYYY-MM-DD.")
+    ap.add_argument("--to", help="Fin del rango, YYYY-MM-DD (default = --from).")
     ap.add_argument("--note-file", default=str(NOTE_FILE_DEFAULT),
                     help="Ruta del week_note.txt (default: ./week_note.txt).")
     args = ap.parse_args()
@@ -438,7 +452,7 @@ def main():
     if not companies:
         sys.exit("No hay empresas configuradas en companies/.")
 
-    start, end = scope_dates(args.month, args.week)
+    start, end = scope_dates(args.month, args.week, args.frm, args.to)
     note = parse_week_note(Path(args.note_file))
 
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] Rango {start} → {end} | "
