@@ -8,7 +8,7 @@ __pycache__/
 # Helpers e inspección de un solo uso (no parte del bot)
 tools_*.py
 inspect_dump.txt
-*_shot.png
+*.png
 
 # Resumen semanal de tareas (datos operativos, puede ser sensible)
 week_note.txt
