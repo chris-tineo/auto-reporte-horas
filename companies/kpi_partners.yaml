@@ -1,0 +1,38 @@
+# KPI Partners — timesheet en BigTime (iq.bigtime.net). Grilla semanal.
+# Fila pre-cargada: Syneos Health:SOW#2026-01 / Cloud Engineer / Billable:Consulting.
+# Solo se cargan horas por día (lun–vie). El bot hace Save; el Submit lo das tú.
+#
+# AUTH: el objetivo final es 'password' (login BigTime de 2 pasos, sin MFA), pero
+# mientras validamos la grilla usamos la sesión ya guardada. Cuando estén las
+# credenciales en .env (KPI_PARTNERS_USER/PASS) lo paso a auth: password.
+
+name: kpi_partners
+active: false                # activar cuando esté validado
+auth: password               # login desatendido (BigTime, sin MFA)
+headless: false
+url: "https://iq.bigtime.net/BigTime/Entry2#/timesheet/weekly"
+
+# Campo email del login BigTime (solo deslogueado) → detecta sesión expirada.
+login_marker: "#Input_EmailAddress"
+
+# Credenciales en .env: KPI_PARTNERS_USER (email) / KPI_PARTNERS_PASS.
+# Login BigTime en 2 pasos: email → "Next Step" → user/pass → "Login".
+login:
+  steps:
+    - { fill: "#Input_EmailAddress", value: "${user}" }
+    - { click: "button[name='Input.Button']" }       # Next Step
+    - { wait_for: "#SPassword" }
+    - { fill: "#SUserName", value: "${user}" }
+    - { fill: "#SPassword", value: "${pass}" }
+    - { click: "button[type=submit]" }               # Login
+
+flow: weekly_grid
+
+weekly_grid:
+  hours: "8"
+  row_selector: "tr"
+  row_match: "Syneos"                  # identifica la fila a llenar
+  week_picker: "a.picker-text"         # muestra el domingo de la semana (YYYY-MM-DD)
+  week_prev: "xpath=//a[contains(@class,'picker-text')]/preceding-sibling::a[contains(@class,'icon-container')][1]"
+  week_next: "xpath=//a[contains(@class,'picker-text')]/following-sibling::a[contains(@class,'icon-container')][1]"
+  save: "button.btn-primary:has-text('Save')"   # botón Save de la fila (NO Submit Hours)

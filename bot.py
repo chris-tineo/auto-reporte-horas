@@ -207,10 +207,32 @@ def session_path(company: str) -> Path:
 
 
 def do_password_login(page, cfg: dict, log: logging.Logger):
-    sel = cfg["selectors"]
     company = cfg["_name"]
     log.info("Login con usuario/contraseña…")
     page.goto(cfg["url"], wait_until="domcontentloaded")
+
+    # Login multi-paso (p. ej. BigTime: email → Next → user/pass → Login).
+    login = cfg.get("login")
+    if login and login.get("steps"):
+        ctx = {"user": get_credential(company, "user"),
+               "pass": get_credential(company, "pass")}
+        for step in login["steps"]:
+            if "wait_for" in step:
+                page.wait_for_selector(step["wait_for"], timeout=20000)
+            elif "fill" in step:
+                val = str(step["value"])
+                for k, v in ctx.items():
+                    val = val.replace("${" + k + "}", v)
+                page.fill(step["fill"], val)
+            elif "click" in step:
+                page.click(step["click"])
+            page.wait_for_timeout(step.get("wait", 900))
+        page.wait_for_load_state("networkidle")
+        log.info("Login (multi-paso) enviado.")
+        return
+
+    # Login de un paso (selectores user/pass/submit).
+    sel = cfg["selectors"]
     page.fill(sel["user"], get_credential(company, "user"))
     page.fill(sel["pass"], get_credential(company, "pass"))
     page.click(sel["submit"])
@@ -353,6 +375,79 @@ def fill_modal_entries(page, cfg: dict, log: logging.Logger, dry_run: bool,
 
 
 # ---------------------------------------------------------------------------
+# Flujo weekly_grid (grilla semanal tipo BigTime: una fila, horas por día)
+# ---------------------------------------------------------------------------
+def _week_sunday(d: date) -> date:
+    """Domingo que inicia la semana Sun–Sat que contiene a d (BigTime)."""
+    return d - timedelta(days=(d.weekday() + 1) % 7)
+
+
+def _goto_week(page, wg: dict, target_sunday: date, log: logging.Logger):
+    picker = wg["week_picker"]
+    for _ in range(70):
+        cur = date.fromisoformat(page.locator(picker).first.inner_text().strip())
+        if cur == target_sunday:
+            return
+        arrow = wg["week_next"] if target_sunday > cur else wg["week_prev"]
+        page.locator(arrow).first.click()
+        page.wait_for_timeout(1300)
+    raise RuntimeError(f"No se pudo navegar a la semana {target_sunday}")
+
+
+def fill_weekly_grid(page, cfg: dict, log: logging.Logger, dry_run: bool,
+                     targets: list[tuple[date, str]]):
+    wg = cfg["weekly_grid"]
+    hours = str(wg.get("hours", "8"))
+    page.goto(cfg["url"], wait_until="networkidle")
+    page.wait_for_selector(wg["week_picker"], timeout=30000)
+    page.wait_for_timeout(3000)
+    _check_session(page, cfg)
+
+    if not targets:
+        log.warning("No hay días a llenar (revisa week_note.txt / rango).")
+        return
+
+    weeks: dict[date, list[date]] = {}
+    for d, _ in targets:
+        weeks.setdefault(_week_sunday(d), []).append(d)
+
+    log.info(f"{len(targets)} día(s) en {len(weeks)} semana(s) BigTime.")
+    for sun in sorted(weeks):
+        days = sorted(weeks[sun])
+        _goto_week(page, wg, sun, log)
+        page.wait_for_timeout(1500)
+        # Celdas de día: td absolutos 4..8 = Mon..Fri (Sun=3, Sat=9, Total=10).
+        # Se re-busca la fila en cada día porque Angular re-renderiza al editar
+        # (los ElementHandle quedarían obsoletos).
+        xp = f"xpath=//tr[contains(., '{wg['row_match']}')]"
+        for d in days:
+            handles = page.query_selector_all(xp)
+            row_h = next((h for h in handles if h.is_visible()), None)
+            if row_h is None:
+                raise RuntimeError(f"No se encontró fila visible '{wg['row_match']}' en {sun}.")
+            tds = row_h.query_selector_all("td")
+            cell = tds[d.weekday() + 4]
+            cell.click()                  # ElementHandle.click auto-scrollea y enfoca
+            page.wait_for_timeout(400)
+            page.keyboard.type(hours)     # escribe en el input enfocado de la celda
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(400)
+        log.info(f"semana {sun}: {hours}h en {[x.isoformat() for x in days]}.")
+
+        if dry_run:
+            shot = LOGS_DIR / f"{cfg['_name']}_dry_{sun}.png"
+            page.screenshot(path=str(shot))
+            page.reload()
+            page.wait_for_timeout(3000)
+            log.info(f"semana {sun}: DRY-RUN, sin Save (recargado). Captura: {shot.name}")
+        else:
+            page.locator(wg["save"]).first.click()
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(1800)
+            log.info(f"semana {sun}: Save hecho (sin Submit).")
+
+
+# ---------------------------------------------------------------------------
 # Runner por empresa
 # ---------------------------------------------------------------------------
 def run_company(company: str, dry_run: bool, note: dict,
@@ -364,7 +459,7 @@ def run_company(company: str, dry_run: bool, note: dict,
         flow = cfg.get("flow", "simple")
 
         targets: list[tuple[date, str]] = []
-        if flow == "modal_entries":
+        if flow in ("modal_entries", "weekly_grid"):
             targets = compute_targets(company, note, start, end, log)
 
         with sync_playwright() as p:
@@ -386,6 +481,8 @@ def run_company(company: str, dry_run: bool, note: dict,
 
             if flow == "modal_entries":
                 fill_modal_entries(page, cfg, log, dry_run, targets)
+            elif flow == "weekly_grid":
+                fill_weekly_grid(page, cfg, log, dry_run, targets)
             else:
                 fill_timesheet(page, cfg, log, dry_run)
             browser.close()
