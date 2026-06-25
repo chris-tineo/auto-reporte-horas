@@ -14,4 +14,14 @@ url: "https://fa-ewms-saasfaprod1.fa.ocs.oraclecloud.com/fscmUI/redwood/time/tim
 # Campo email del login de Microsoft (solo deslogueado) → detecta sesión expirada.
 login_marker: "input[name='loginfmt']"
 
-# flow: TODO — la pantalla de Time Entry de Oracle Fusion se inspecciona tras el --login.
+# flow: NINGUNO POR AHORA — automatización en pausa.
+# La grilla es un Oracle JET oj-data-grid virtualizado: lectura NO confiable
+# (pinta valores "fantasma" al scrollear por reciclaje de DOM) y escritura
+# propensa a errores (ej. "88" por doble entrada). No es seguro automatizar
+# sin riesgo de datos erróneos en un timesheet real. Llenado manual por ahora.
+# Opción robusta a futuro: REST API de Oracle HCM Time and Labor (requiere acceso).
+#
+# Datos confirmados (por si se retoma): Time Card QUINCENAL; fila pre-cargada
+# "TS Data Mgmt Non-Bill - TS Data / DataGov - DataGov / Regular Hours"; 8h
+# lun-vie en celdas Quantity; gesto de edición = doble-click celda → escribir →
+# Enter; Save (no autosave: cerrar sin Save descarta); Submit ~quincenal aparte.
