@@ -22,6 +22,7 @@ Uso:
 
 import argparse
 import calendar
+import json
 import os
 import re
 import sys
@@ -482,6 +483,126 @@ def fill_weekly_grid(page, cfg: dict, log: logging.Logger, dry_run: bool,
 
 
 # ---------------------------------------------------------------------------
+# Flujo oracle_api (Oracle Fusion: escribe vía la API backend, no la grilla)
+# ---------------------------------------------------------------------------
+def _oj_items(x):
+    return x.get("items", []) if isinstance(x, dict) else (x or [])
+
+
+def _find_timecard(o):
+    if isinstance(o, dict):
+        if "TimeCardId" in o and "timeEntries" in o:
+            return o
+        if isinstance(o.get("timeCards"), list) and o["timeCards"]:
+            return _find_timecard(o["timeCards"][0])
+        for v in o.values():
+            r = _find_timecard(v)
+            if r:
+                return r
+    if isinstance(o, list):
+        for v in o:
+            r = _find_timecard(v)
+            if r:
+                return r
+    return None
+
+
+def fill_oracle_api(page, cfg: dict, log: logging.Logger, dry_run: bool,
+                    targets: list[tuple[date, str]]):
+    """Replica la llamada de guardado de la UI Redwood: captura un token de la
+    sesión + el timecard actual, y hace POST con las entradas nuevas. Verificable."""
+    oa = cfg["oracle_api"]
+    cap = {"token": None, "tc": None}
+
+    def on_req(r):
+        a = r.headers.get("authorization", "")
+        if a.startswith("Bearer ") and not cap["token"]:
+            cap["token"] = a
+
+    def on_resp(resp):
+        u = resp.url
+        if "hcmRestApi" in u and resp.request.method == "GET" and "timeCard" in u and not cap["tc"]:
+            try:
+                b = resp.text()
+                if "TimeCardId" in b and "timeEntries" in b:
+                    cap["tc"] = b
+            except Exception:  # noqa: BLE001
+                pass
+
+    page.on("request", on_req)
+    page.on("response", on_resp)
+    page.goto(cfg["url"], wait_until="networkidle", timeout=90000)
+    page.wait_for_timeout(12000)
+    _check_session(page, cfg)
+    if not cap["token"] or not cap["tc"]:
+        raise RuntimeError("No se capturó token o timecard de Oracle (¿sesión expirada?).")
+
+    tc = _find_timecard(json.loads(cap["tc"]))
+    if not tc:
+        raise RuntimeError("No se encontró el timecard en la respuesta de Oracle.")
+    entries = _oj_items(tc.get("timeEntries"))
+    existing_dates = {str(e.get("EntryDate"))[:10] for e in entries}
+    start, stop = str(tc.get("StartDate", ""))[:10], str(tc.get("StopDate", ""))[:10]
+    log.info(f"Timecard {tc.get('TimeCardId')} período {start}..{stop}, {len(entries)} entradas.")
+
+    # Campos constantes (proyecto/tarea/tipo): de una entrada existente, o del YAML.
+    if entries:
+        const_fields = [{"TimeCardFieldId": f.get("TimeCardFieldId"), "Value": f.get("Value")}
+                        for f in _oj_items(entries[0].get("timeCardFieldValues"))]
+    else:
+        const_fields = oa.get("fields", [])
+    if not const_fields:
+        raise RuntimeError("No hay campos de referencia (timecard vacío y sin 'fields' en el YAML).")
+
+    # Entradas existentes en formato POST (reenviadas tal cual).
+    existing = []
+    for e in entries:
+        fvs = [{"TimeCardFieldId": f.get("TimeCardFieldId"), "TimeEntryId": f.get("TimeEntryId"),
+                "Value": f.get("Value")} for f in _oj_items(e.get("timeCardFieldValues"))]
+        existing.append({
+            "EntryDate": e.get("EntryDate"), "TimeEntryId": e.get("TimeEntryId"),
+            "TimeEntryVersion": e.get("TimeEntryVersion"), "UnitOfMeasure": e.get("UnitOfMeasure"),
+            "Measure": e.get("Measure"), "Comments": e.get("Comments"), "timeCardFieldValues": fvs,
+        })
+
+    hours = oa.get("hours", 8)
+    new = []
+    for i, (d, _) in enumerate(targets):
+        iso = d.isoformat()
+        if not (start <= iso <= stop) or iso in existing_dates:
+            continue
+        new.append({
+            "EntryDate": f"{iso}T00:00:00",
+            "TimeEntryId": str(6703139780000000 + int(d.strftime("%m%d")) * 100 + i),
+            "TimeEntryVersion": 0, "UnitOfMeasure": "HR", "Measure": hours,
+            "timeCardFieldValues": [dict(f) for f in const_fields],
+        })
+
+    if not new:
+        log.info(f"Nada que agregar: todos los días objetivo ya están en {start}..{stop}.")
+        return
+    log.info(f"A agregar: {[n['EntryDate'][:10] for n in new]}")
+    if dry_run:
+        log.info("DRY-RUN: no se hace POST.")
+        return
+
+    body = {
+        "TimeCardId": tc.get("TimeCardId"), "TimeCardVersion": tc.get("TimeCardVersion"),
+        "PersonId": tc.get("PersonId"), "StartDate": tc.get("StartDate"), "StopDate": tc.get("StopDate"),
+        "ProcessMode": "TIME_SAVE", "timeEntries": existing + new,
+        "UserContext": "WORKER", "IgnoreWarningsFlag": False,
+    }
+    resp = page.context.request.post(
+        oa["endpoint"],
+        headers={"Authorization": cap["token"], "Content-Type": oa["content_type"]},
+        data=json.dumps(body),
+    )
+    if resp.status not in (200, 201):
+        raise RuntimeError(f"POST falló: {resp.status} {resp.text()[:200]}")
+    log.info(f"POST OK ({resp.status}). {len(new)} día(s) agregados.")
+
+
+# ---------------------------------------------------------------------------
 # Runner por empresa
 # ---------------------------------------------------------------------------
 def run_company(company: str, dry_run: bool, note: dict,
@@ -493,7 +614,7 @@ def run_company(company: str, dry_run: bool, note: dict,
         flow = cfg.get("flow", "simple")
 
         targets: list[tuple[date, str]] = []
-        if flow in ("modal_entries", "weekly_grid"):
+        if flow in ("modal_entries", "weekly_grid", "oracle_api"):
             targets = compute_targets(company, note, start, end, log)
 
         with sync_playwright() as p:
@@ -517,6 +638,8 @@ def run_company(company: str, dry_run: bool, note: dict,
                 fill_modal_entries(page, cfg, log, dry_run, targets)
             elif flow == "weekly_grid":
                 fill_weekly_grid(page, cfg, log, dry_run, targets, submit)
+            elif flow == "oracle_api":
+                fill_oracle_api(page, cfg, log, dry_run, targets)
             else:
                 fill_timesheet(page, cfg, log, dry_run)
             browser.close()

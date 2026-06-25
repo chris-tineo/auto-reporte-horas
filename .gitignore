@@ -16,3 +16,5 @@ week_note.txt
 # Capturas de red (pueden contener tokens de auth)
 *_capture.txt
 syneos_capture.txt
+syneos_token.txt
+syneos_timecard.json

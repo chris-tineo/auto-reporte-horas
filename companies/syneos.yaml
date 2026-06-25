@@ -4,24 +4,29 @@
 # 2) Luego corre normal y reutiliza auth/syneos_state.json hasta que expire.
 
 name: syneos
-active: false                # activar cuando el flujo esté validado
+active: true                 # validado: llenado por la API backend de Oracle
 auth: session
-headless: false              # false mientras configuramos
+headless: true               # el flujo no depende de la UI visible
 
-# Pantalla de Time Cards (UI Redwood).
+# Pantalla de Time Cards (UI Redwood) — se usa para capturar token + timecard actual.
 url: "https://fa-ewms-saasfaprod1.fa.ocs.oraclecloud.com/fscmUI/redwood/time/timecards/landing-page"
 
 # Campo email del login de Microsoft (solo deslogueado) → detecta sesión expirada.
 login_marker: "input[name='loginfmt']"
 
-# flow: NINGUNO POR AHORA — automatización en pausa.
-# La grilla es un Oracle JET oj-data-grid virtualizado: lectura NO confiable
-# (pinta valores "fantasma" al scrollear por reciclaje de DOM) y escritura
-# propensa a errores (ej. "88" por doble entrada). No es seguro automatizar
-# sin riesgo de datos erróneos en un timesheet real. Llenado manual por ahora.
-# Opción robusta a futuro: REST API de Oracle HCM Time and Labor (requiere acceso).
-#
-# Datos confirmados (por si se retoma): Time Card QUINCENAL; fila pre-cargada
-# "TS Data Mgmt Non-Bill - TS Data / DataGov - DataGov / Regular Hours"; 8h
-# lun-vie en celdas Quantity; gesto de edición = doble-click celda → escribir →
-# Enter; Save (no autosave: cerrar sin Save descarta); Submit ~quincenal aparte.
+flow: oracle_api
+
+# La UI Redwood NO permite escribir por automatización (grid JET virtualizado).
+# En su lugar replicamos la llamada de guardado que la propia UI hace al backend:
+# capturamos un token (de la sesión, vía tokenrelay) + el timecard actual por GET,
+# y hacemos POST con las entradas nuevas. Verificable por GET. Submit ~quincenal: manual.
+oracle_api:
+  endpoint: "https://fa-ewms-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/rest/rv:2d502272-0c89-41f5-bf87-f3e9057cde1e/en/11.13.18.05:9/timeCards"
+  content_type: "application/vnd.oracle.adf.resourceitem+json"
+  hours: 8
+  # 'fields' (los 7 timeCardFieldValues: Project/Task/Time Type/etc.) se toman en
+  # runtime de una entrada existente del timecard; no hace falta hardcodearlos.
+# Contexto: Time Card QUINCENAL; fila pre-cargada "TS Data Mgmt Non-Bill / DataGov /
+# Regular Hours". La UI Redwood (grid JET) NO es automatizable (lectura fantasma,
+# escritura no cuaja); por eso usamos la API backend. El llenado escribe los días
+# hábiles del período cargado que falten. El "Submit" (~quincenal) se hace a mano.
