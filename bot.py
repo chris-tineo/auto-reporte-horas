@@ -97,6 +97,16 @@ def list_active_companies() -> list[str]:
     return sorted(names)
 
 
+def list_companies_by_job(job: str) -> list[str]:
+    names = []
+    for path in glob.glob(str(COMPANIES_DIR / "*.yaml")):
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        if cfg.get("job") == job and cfg.get("active", True):
+            names.append(Path(path).stem)
+    return sorted(names)
+
+
 def get_credential(company: str, kind: str) -> str:
     """Lee credenciales de variables de entorno: EMPRESA_A_USER / EMPRESA_A_PASS."""
     key = f"{company.upper()}_{kind.upper()}"
@@ -160,10 +170,18 @@ def parse_week_note(path: Path) -> dict:
     return data
 
 
-def compute_targets(company: str, note: dict, start: date, end: date,
+def weeks_for(company: str, cfg: dict, note: dict) -> dict:
+    """Días trabajados: sección [empresa] si existe, si no la del trabajo [job:<job>].
+    Así un trabajo (varias empresas) se define una sola vez y no se desalinean."""
+    if company in note:
+        return note[company]
+    job = cfg.get("job")
+    return note.get(f"job:{job}", {}) if job else {}
+
+
+def compute_targets(weeks: dict, start: date, end: date,
                     log: logging.Logger) -> list[tuple[date, str]]:
     """Lista (fecha, observación) para los días trabajados en [start, end]."""
-    weeks = note.get(company, {})
     targets: list[tuple[date, str]] = []
     d = start
     while d <= end:
@@ -615,7 +633,7 @@ def run_company(company: str, dry_run: bool, note: dict,
 
         targets: list[tuple[date, str]] = []
         if flow in ("modal_entries", "weekly_grid", "oracle_api"):
-            targets = compute_targets(company, note, start, end, log)
+            targets = compute_targets(weeks_for(company, cfg, note), start, end, log)
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=cfg.get("headless", True))
@@ -684,6 +702,7 @@ def notify_failure(company: str, msg: str):
 def main():
     ap = argparse.ArgumentParser(description="Rutina de llenado de horas multi-empresa.")
     ap.add_argument("--company", help="Nombre de la empresa (archivo en companies/).")
+    ap.add_argument("--job", help="Corre todas las empresas de un trabajo (campo job: en el YAML).")
     ap.add_argument("--login", action="store_true",
                     help="Login manual para guardar sesión (empresas con MFA).")
     ap.add_argument("--dry-run", action="store_true",
@@ -704,7 +723,14 @@ def main():
         manual_login_flow(args.company)
         return
 
-    companies = [args.company] if args.company else list_active_companies()
+    if args.company:
+        companies = [args.company]
+    elif args.job:
+        companies = list_companies_by_job(args.job)
+        if not companies:
+            sys.exit(f"No hay empresas activas con job: {args.job}")
+    else:
+        companies = list_active_companies()
     if not companies:
         sys.exit("No hay empresas configuradas en companies/.")
 

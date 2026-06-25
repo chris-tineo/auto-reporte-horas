@@ -4,6 +4,7 @@
 # 2) Luego corre normal y reutiliza auth/syneos_state.json hasta que expire.
 
 name: syneos
+job: syneos                  # grupo: Bertoni + KPI Partners + Syneos = un trabajo
 active: true                 # validado: llenado por la API backend de Oracle
 auth: session
 headless: true               # el flujo no depende de la UI visible

@@ -7,6 +7,7 @@
 # (sección [bertoni]). Las constantes (8h, proyecto, etc.) viven aquí.
 
 name: bertoni
+job: syneos                   # grupo: Bertoni + KPI Partners + Syneos = un trabajo
 active: true
 auth: session
 headless: false              # false mientras validamos; true cuando esté estable

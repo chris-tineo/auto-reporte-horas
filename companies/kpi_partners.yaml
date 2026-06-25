@@ -7,6 +7,7 @@
 # credenciales en .env (KPI_PARTNERS_USER/PASS) lo paso a auth: password.
 
 name: kpi_partners
+job: syneos                  # grupo: Bertoni + KPI Partners + Syneos = un trabajo
 active: true                 # validado (login password + grilla + submit)
 auth: password               # login desatendido (BigTime, sin MFA)
 headless: false
