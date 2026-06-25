@@ -1,0 +1,13 @@
+# Health Equity — cliente final del grupo "health_equity" (donde Christian trabaja
+# a diario; es consultor de Kforce, contratado/pagado por Taller).
+#
+# IMPORTANTE: su sistema de horas es una web PRIVADA, NO accesible desde Internet.
+# Por eso NO lo maneja este bot. Lo llena OTRA sesión de Claude (Claude Code) que
+# corre en la máquina con acceso a ese sistema. Se documenta aquí solo para tener
+# el grupo completo. Reglas comunes del grupo: 8h/día hábil, nunca feriados de USA
+# ni fines de semana; los 3 sistemas deben coincidir en días/horas.
+
+name: health_equity
+job: health_equity
+active: false               # externo: no lo corre el bot
+flow: external

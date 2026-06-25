@@ -1,0 +1,15 @@
+# Taller Technologies — grupo de trabajo "health_equity".
+# Empresa que contrató a Christian y le PAGA mensualmente. Login con cuenta de Google
+# → sesión persistida. Accesible desde Internet → se automatiza desde este repo.
+#
+# TODO (cuando arranquemos Taller): login manual una vez (Google) para guardar sesión,
+# inspeccionar el sistema, y fijar url / login_marker / flow / selectores.
+
+name: taller
+job: health_equity
+active: false               # activar cuando esté validado
+auth: session               # cuenta de Google (login manual una vez)
+headless: false
+# url: "TODO"
+# login_marker: "TODO"
+# flow: "TODO"

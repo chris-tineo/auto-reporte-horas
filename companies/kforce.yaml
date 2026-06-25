@@ -1,0 +1,15 @@
+# Kforce — grupo de trabajo "health_equity".
+# Consultora americana con el contrato con Health Equity; Christian es su consultor.
+# Login usuario/contraseña. Accesible desde Internet → se automatiza desde este repo.
+#
+# TODO (cuando arranquemos Kforce): inspeccionar el sistema, fijar url / login_marker /
+# flow / selectores, y agregar credenciales a .env (KFORCE_USER / KFORCE_PASS).
+
+name: kforce
+job: health_equity
+active: false               # activar cuando esté validado
+auth: password
+headless: false
+# url: "TODO"
+# login_marker: "TODO"
+# flow: "TODO"
