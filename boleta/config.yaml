@@ -1,0 +1,10 @@
+# Datos fijos de la boleta (factura) a Bertoni. El n° de factura incrementa por mes.
+issuer:
+  name: "Christian Victor Tineo Quispe"
+  id: "76272943"
+  address: "Av. Jose Pardo 1035 – Miraflores – Lima, Peru"
+bill_to:
+  name: "Bertoni Solutions GmbH"
+  address: "Zugerstrasse 76 b CH-6340 Baar, Zug, Suiza."
+rate: 30
+next_invoice: 20        # junio 2026 (mayo fue la 19)

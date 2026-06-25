@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 2.2cm 2.2cm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Calibri', 'Segoe UI', Arial, sans-serif; color: #000; font-size: 11pt; }
+  p { margin: 0 0 2px 0; }
+  .label { font-weight: bold; }
+  .top { width: 100%; }
+  .top td { vertical-align: top; }
+  .name { font-size: 22pt; font-weight: bold; margin: 0 0 10px 0; }
+  .right { text-align: left; font-size: 10pt; }
+  .right .block { margin-bottom: 14px; }
+  .billto { margin-top: 22px; }
+  table.items { width: 100%; border-collapse: collapse; margin-top: 34px; }
+  table.items th, table.items td { border: 1px solid #000; padding: 9px 11px; }
+  table.items th { font-weight: normal; text-align: center; }
+  .desc { width: 47%; vertical-align: top; min-height: 150px; }
+  .col-hours, .col-rate { width: 13%; text-align: left; vertical-align: top; }
+  .col-amt { width: 27%; text-align: right; vertical-align: top; }
+  td.col-hours, td.col-rate { vertical-align: top; }
+  .descrow td { height: 150px; vertical-align: top; }
+  table.totals { width: 100%; border-collapse: collapse; }
+  table.totals td { padding: 8px 11px; }
+  .totlabel { text-align: right; width: 60%; }
+  .totbox { border: 1px solid #000; text-align: right; width: 27%; }
+  .spacer { width: 13%; border: none; }
+</style>
+</head>
+<body>
+  <table class="top">
+    <tr>
+      <td>
+        <p class="name">{{name}}</p>
+        <p><span class="label">N° de identificación:</span>&nbsp;&nbsp;{{id}}</p>
+        <p style="margin-top:8px;"><span class="label">Dirección:</span></p>
+        <p class="label">{{address}}</p>
+      </td>
+      <td class="right" style="width: 34%;">
+        <div class="block"><p class="label">Fecha:</p><p>{{date}}</p></div>
+        <div class="block"><p><span class="label">Factura n°:</span>&nbsp;&nbsp;{{invoice}}</p></div>
+      </td>
+    </tr>
+  </table>
+
+  <div class="billto">
+    <p class="label">FACTURAR A:</p>
+    <p>{{bill_to_name}}</p>
+    <p>Dirección: {{bill_to_address}}</p>
+  </div>
+
+  <table class="items">
+    <tr>
+      <th class="desc">DESCRIPCIÓN</th>
+      <th class="col-hours">HORAS</th>
+      <th class="col-rate">TASA</th>
+      <th class="col-amt">CANTIDAD</th>
+    </tr>
+    <tr class="descrow">
+      <td class="desc">{{description}}</td>
+      <td class="col-hours">{{hours}}</td>
+      <td class="col-rate">{{rate}}</td>
+      <td class="col-amt">{{amount}}</td>
+    </tr>
+  </table>
+
+  <table class="totals">
+    <tr>
+      <td class="spacer"></td>
+      <td class="totlabel">SUBTOTAL</td>
+      <td class="totbox">{{amount}}</td>
+    </tr>
+    <tr>
+      <td class="spacer"></td>
+      <td class="totlabel">TOTAL</td>
+      <td class="totbox">{{amount}}</td>
+    </tr>
+  </table>
+</body>
+</html>
