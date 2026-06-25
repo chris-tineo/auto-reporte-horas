@@ -22,12 +22,15 @@ flow: oracle_api
 # capturamos un token (de la sesión, vía tokenrelay) + el timecard actual por GET,
 # y hacemos POST con las entradas nuevas. Verificable por GET. Submit ~quincenal: manual.
 oracle_api:
-  endpoint: "https://fa-ewms-saasfaprod1.fa.ocs.oraclecloud.com/hcmRestApi/rest/rv:2d502272-0c89-41f5-bf87-f3e9057cde1e/en/11.13.18.05:9/timeCards"
+  # El endpoint se deriva en runtime del tráfico (el rv:<UUID> cambia por sesión).
+  version: "11.13.18.05:9"
   content_type: "application/vnd.oracle.adf.resourceitem+json"
   hours: 8
   # 'fields' (los 7 timeCardFieldValues: Project/Task/Time Type/etc.) se toman en
   # runtime de una entrada existente del timecard; no hace falta hardcodearlos.
 # Contexto: Time Card QUINCENAL; fila pre-cargada "TS Data Mgmt Non-Bill / DataGov /
 # Regular Hours". La UI Redwood (grid JET) NO es automatizable (lectura fantasma,
-# escritura no cuaja); por eso usamos la API backend. El llenado escribe los días
-# hábiles del período cargado que falten. El "Submit" (~quincenal) se hace a mano.
+# escritura no cuaja); por eso usamos la API backend. Llenado (TIME_SAVE) escribe
+# los días hábiles del período cargado que falten. Submit con --submit (TIME_SUBMIT).
+# Nota: el flujo opera sobre el período que carga la UI; para enviar AMBAS quincenas
+# el día 24 falta resolver cargar el período anterior (validar el próximo mes).

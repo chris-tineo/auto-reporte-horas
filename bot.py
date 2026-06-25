@@ -526,11 +526,12 @@ def _find_timecard(o):
 
 
 def fill_oracle_api(page, cfg: dict, log: logging.Logger, dry_run: bool,
-                    targets: list[tuple[date, str]]):
-    """Replica la llamada de guardado de la UI Redwood: captura un token de la
-    sesión + el timecard actual, y hace POST con las entradas nuevas. Verificable."""
+                    targets: list[tuple[date, str]], submit: bool = False):
+    """Replica las llamadas de la UI Redwood al backend: captura token + timecard
+    actual, y hace POST (TIME_SAVE para agregar días, TIME_SUBMIT con --submit).
+    El endpoint se deriva del tráfico (el rv:<UUID> cambia entre sesiones)."""
     oa = cfg["oracle_api"]
-    cap = {"token": None, "tc": None}
+    cap = {"token": None, "tc": None, "url": None}
 
     def on_req(r):
         a = r.headers.get("authorization", "")
@@ -544,6 +545,7 @@ def fill_oracle_api(page, cfg: dict, log: logging.Logger, dry_run: bool,
                 b = resp.text()
                 if "TimeCardId" in b and "timeEntries" in b:
                     cap["tc"] = b
+                    cap["url"] = u
             except Exception:  # noqa: BLE001
                 pass
 
@@ -596,28 +598,47 @@ def fill_oracle_api(page, cfg: dict, log: logging.Logger, dry_run: bool,
             "timeCardFieldValues": [dict(f) for f in const_fields],
         })
 
-    if not new:
+    if new:
+        log.info(f"A agregar: {[n['EntryDate'][:10] for n in new]}")
+    elif not submit:
         log.info(f"Nada que agregar: todos los días objetivo ya están en {start}..{stop}.")
         return
-    log.info(f"A agregar: {[n['EntryDate'][:10] for n in new]}")
+
+    # Endpoint derivado del tráfico (host + rv:<UUID> de la GET); el rv cambia por sesión.
+    m = re.search(r"(https://[^/]+/hcmRestApi/rest/rv:[0-9a-fA-F-]+)", cap["url"] or "")
+    if not m:
+        raise RuntimeError("No se pudo derivar el endpoint del timecard.")
+    endpoint = f"{m.group(1)}/en/{oa.get('version', '11.13.18.05:9')}/timeCards"
+
+    def post(mode: str, entries: list) -> int:
+        body = {
+            "TimeCardId": tc.get("TimeCardId"), "TimeCardVersion": tc.get("TimeCardVersion"),
+            "PersonId": tc.get("PersonId"), "StartDate": tc.get("StartDate"),
+            "StopDate": tc.get("StopDate"), "ProcessMode": mode, "timeEntries": entries,
+            "UserContext": "WORKER", "IgnoreWarningsFlag": False,
+        }
+        resp = page.context.request.post(
+            endpoint, headers={"Authorization": cap["token"], "Content-Type": oa["content_type"]},
+            data=json.dumps(body))
+        if resp.status not in (200, 201):
+            raise RuntimeError(f"POST {mode} falló: {resp.status} {resp.text()[:200]}")
+        return resp.status
+
     if dry_run:
-        log.info("DRY-RUN: no se hace POST.")
+        if new:
+            log.info(f"DRY-RUN: se agregarían {len(new)} día(s); no se hace POST.")
+        if submit:
+            log.info(f"DRY-RUN: se haría SUBMIT del período {start}..{stop}; no se hace POST.")
         return
 
-    body = {
-        "TimeCardId": tc.get("TimeCardId"), "TimeCardVersion": tc.get("TimeCardVersion"),
-        "PersonId": tc.get("PersonId"), "StartDate": tc.get("StartDate"), "StopDate": tc.get("StopDate"),
-        "ProcessMode": "TIME_SAVE", "timeEntries": existing + new,
-        "UserContext": "WORKER", "IgnoreWarningsFlag": False,
-    }
-    resp = page.context.request.post(
-        oa["endpoint"],
-        headers={"Authorization": cap["token"], "Content-Type": oa["content_type"]},
-        data=json.dumps(body),
-    )
-    if resp.status not in (200, 201):
-        raise RuntimeError(f"POST falló: {resp.status} {resp.text()[:200]}")
-    log.info(f"POST OK ({resp.status}). {len(new)} día(s) agregados.")
+    if new:
+        log.info(f"TIME_SAVE OK ({post('TIME_SAVE', existing + new)}). {len(new)} día(s) agregados.")
+    if submit:
+        if new:
+            log.warning("Había días sin guardar; se guardaron y ahora se envía el estado actual.")
+        # Para submit reenviamos las entradas vigentes (las nuevas ya quedaron guardadas arriba).
+        log.info(f"TIME_SUBMIT OK ({post('TIME_SUBMIT', existing + new)}). "
+                 f"Período {start}..{stop} ENVIADO.")
 
 
 # ---------------------------------------------------------------------------
@@ -657,7 +678,7 @@ def run_company(company: str, dry_run: bool, note: dict,
             elif flow == "weekly_grid":
                 fill_weekly_grid(page, cfg, log, dry_run, targets, submit)
             elif flow == "oracle_api":
-                fill_oracle_api(page, cfg, log, dry_run, targets)
+                fill_oracle_api(page, cfg, log, dry_run, targets, submit)
             else:
                 fill_timesheet(page, cfg, log, dry_run)
             browser.close()
