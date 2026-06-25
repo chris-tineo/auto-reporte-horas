@@ -1,0 +1,30 @@
+# Orquestador del proceso mensual del grupo de trabajo "Syneos".
+job: syneos
+rate: 30                     # USD por hora (boleta)
+
+manager:
+  email: "anima.pimenta@syneoshealth.com"
+  teams_message: "Hi Anima, can you approve my timesheets please? I just submitted them."
+
+email:
+  to: "gabriela.quispe@bertonisolutions.com"
+  cc: "josemiguel@bertonisolutions.com"
+  subject_tpl: "Envio Boleta y Timesheets {month_name} {year}"
+
+sessions:
+  kpi: "auth/kpi_partners_state.json"
+  syneos: "auth/syneos_state.json"
+  teams: "auth/teams_state.json"
+  outlook: "auth/bertoni_state.json"
+  sharepoint: "auth/kpi_sharepoint_state.json"
+
+kpi:
+  weekly_url: "https://iq.bigtime.net/BigTime/Entry2#/timesheet/weekly"
+  row_match: "Syneos"
+
+syneos:
+  timecard_url: "https://fa-ewms-saasfaprod1.fa.ocs.oraclecloud.com/fscmUI/redwood/time/timecards/landing-page"
+
+sharepoint:
+  url: "https://kpipartners0-my.sharepoint.com/personal/rajesh_ramachandran_kpipartners_com/_layouts/15/onedrive.aspx?id=%2Fpersonal%2Frajesh_ramachandran_kpipartners_com%2FDocuments%2FAccounting new%2FSateesh OffShore Files%2FClient Time sheet%2FSyneos 2026%2FQuispe%2C Christian Victor Tineo"
+  folder_marker: "Quispe, Christian Victor Tineo"
