@@ -1,0 +1,17 @@
+# Syneos Health — Oracle Fusion Cloud (fscmUI). Login SSO Microsoft (Azure AD) + MFA.
+# Usa sesión persistida.
+# 1) Una vez:  python bot.py --company syneos --login   (login Microsoft + MFA a mano)
+# 2) Luego corre normal y reutiliza auth/syneos_state.json hasta que expire.
+
+name: syneos
+active: false                # activar cuando el flujo esté validado
+auth: session
+headless: false              # false mientras configuramos
+
+# Pantalla de Time Cards (UI Redwood).
+url: "https://fa-ewms-saasfaprod1.fa.ocs.oraclecloud.com/fscmUI/redwood/time/timecards/landing-page"
+
+# Campo email del login de Microsoft (solo deslogueado) → detecta sesión expirada.
+login_marker: "input[name='loginfmt']"
+
+# flow: TODO — la pantalla de Time Entry de Oracle Fusion se inspecciona tras el --login.
