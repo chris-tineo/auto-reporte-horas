@@ -19,5 +19,7 @@ syneos_capture.txt
 syneos_token.txt
 syneos_timecard.json
 
-# PDFs generados (boletas, exports)
+# PDFs/exports generados (boletas, timecards) e imágenes del correo
 *.pdf
+export/
+img/
