@@ -246,7 +246,10 @@ def do_password_login(page, cfg: dict, log: logging.Logger):
             elif "click" in step:
                 page.click(step["click"])
             page.wait_for_timeout(step.get("wait", 900))
-        page.wait_for_load_state("networkidle")
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:  # noqa: BLE001
+            page.wait_for_timeout(3000)
         log.info("Login (multi-paso) enviado.")
         return
 
@@ -255,7 +258,10 @@ def do_password_login(page, cfg: dict, log: logging.Logger):
     page.fill(sel["user"], get_credential(company, "user"))
     page.fill(sel["pass"], get_credential(company, "pass"))
     page.click(sel["submit"])
-    page.wait_for_load_state("networkidle")
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:  # noqa: BLE001  (apps SAP no llegan a networkidle)
+        page.wait_for_timeout(3000)
     log.info("Login enviado.")
 
 
@@ -642,6 +648,99 @@ def fill_oracle_api(page, cfg: dict, log: logging.Logger, dry_run: bool,
 
 
 # ---------------------------------------------------------------------------
+# Flujo fieldglass (SAP Fieldglass: time sheet semanal, fila ST/Hr por día)
+# ---------------------------------------------------------------------------
+def fill_fieldglass(page, cfg: dict, log: logging.Logger, dry_run: bool,
+                    targets: list[tuple[date, str]], submit: bool = False):
+    fg = cfg["fieldglass"]
+    hours = str(fg.get("hours", "8"))
+    page.on("dialog", lambda d: d.accept())  # confirma diálogos (p. ej. al cancelar)
+
+    page.wait_for_timeout(8000)   # deja cargar el nav tras el login
+    _check_session(page, cfg)
+    if not targets:
+        log.warning("No hay días a llenar (revisa week_note.txt / rango).")
+        return
+
+    # Navegar por el menú: Time & Expense -> Time Sheets (más fiable que goto directo)
+    page.wait_for_selector("text=Time & Expense", timeout=30000)
+    page.get_by_text("Time & Expense", exact=False).first.click()
+    page.wait_for_timeout(2500)
+    page.get_by_text("Time Sheets", exact=False).first.click()
+    page.wait_for_timeout(6000)
+    u = page.get_by_text("Understood", exact=False)
+    if u.count():
+        u.first.click()
+        page.wait_for_timeout(800)
+
+    # Abrir el time sheet en Draft (la fila con estado "Draft").
+    page.wait_for_selector("a[href*='time_sheet_detail']", timeout=30000)
+    draft = page.locator("[role=row]").filter(has_text="Draft").locator("a[href*='time_sheet_detail']")
+    (draft.first if draft.count() else
+     page.locator("a[href*='time_sheet_detail']").first).click()
+    page.wait_for_timeout(7000)
+    u = page.get_by_text("Understood", exact=False)
+    if u.count():
+        u.first.click()
+        page.wait_for_timeout(800)
+    # SALVAGUARDA: el detalle debe estar en estado Draft.
+    if "Draft" not in (page.query_selector("body").inner_text() or ""):
+        raise RuntimeError("El time sheet abierto no está en Draft; abortando.")
+
+    page.get_by_text("Edit", exact=True).first.click()
+    page.wait_for_timeout(12000)
+    # buscar el frame con los inputs de horas (puede tardar en renderizar).
+    frame = None
+    for i in range(15):
+        counts = []
+        for f in page.frames:
+            try:
+                n = len(f.query_selector_all("input[title*='/']"))
+                counts.append((f.url[:40], n))
+                if n >= 5:
+                    frame = f
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+        if frame:
+            break
+        if i in (0, 5, 10):
+            log.info(f"esperando form… frames={counts}")
+        page.wait_for_timeout(2500)
+    if frame is None:
+        page.screenshot(path=str(LOGS_DIR / f"{cfg['_name']}_noform.png"))
+        raise RuntimeError("No se encontró el form de edición de Fieldglass.")
+
+    # ST/Hr = primer input de cada día (la fila ST va antes que OT en el DOM).
+    # Targeteo por fecha "D/M" del title (único dentro de una semana Sun-Sat).
+    filled = []
+    for d, _ in targets:
+        daystr = f"{d.day}/{d.month}"
+        inp = frame.locator(f"input[title*='{daystr}']").first
+        inp.fill(hours)
+        inp.dispatch_event("change")
+        filled.append(d.isoformat())
+        page.wait_for_timeout(300)
+    log.info(f"ST/Hr {hours}h en {filled}.")
+
+    if dry_run:
+        page.screenshot(path=str(LOGS_DIR / f"{cfg['_name']}_dry.png"))
+        page.get_by_text("Cancel", exact=True).first.click()
+        page.wait_for_timeout(1500)
+        log.info("DRY-RUN: cancelado sin guardar.")
+        return
+
+    if submit:
+        page.get_by_text("Submit", exact=True).first.click()
+        page.wait_for_timeout(4000)
+        log.info("Submit hecho.")
+    else:
+        page.get_by_text("Complete Later", exact=False).first.click()
+        page.wait_for_timeout(4000)
+        log.info("Guardado como borrador (Complete Later).")
+
+
+# ---------------------------------------------------------------------------
 # Runner por empresa
 # ---------------------------------------------------------------------------
 def run_company(company: str, dry_run: bool, note: dict,
@@ -653,7 +752,7 @@ def run_company(company: str, dry_run: bool, note: dict,
         flow = cfg.get("flow", "simple")
 
         targets: list[tuple[date, str]] = []
-        if flow in ("modal_entries", "weekly_grid", "oracle_api"):
+        if flow in ("modal_entries", "weekly_grid", "oracle_api", "fieldglass"):
             targets = compute_targets(weeks_for(company, cfg, note), start, end, log)
 
         with sync_playwright() as p:
@@ -679,6 +778,8 @@ def run_company(company: str, dry_run: bool, note: dict,
                 fill_weekly_grid(page, cfg, log, dry_run, targets, submit)
             elif flow == "oracle_api":
                 fill_oracle_api(page, cfg, log, dry_run, targets, submit)
+            elif flow == "fieldglass":
+                fill_fieldglass(page, cfg, log, dry_run, targets, submit)
             else:
                 fill_timesheet(page, cfg, log, dry_run)
             browser.close()

@@ -1,15 +1,30 @@
 # Kforce — grupo de trabajo "health_equity".
 # Consultora americana con el contrato con Health Equity; Christian es su consultor.
-# Login usuario/contraseña. Accesible desde Internet → se automatiza desde este repo.
-#
-# TODO (cuando arranquemos Kforce): inspeccionar el sistema, fijar url / login_marker /
-# flow / selectores, y agregar credenciales a .env (KFORCE_USER / KFORCE_PASS).
+# Sistema: SAP Fieldglass (VMS). Login usuario/contraseña directo.
+# Credenciales en .env: KFORCE_USER / KFORCE_PASS.
 
 name: kforce
 job: health_equity
 active: false               # activar cuando esté validado
 auth: password
-headless: false
-# url: "TODO"
-# login_marker: "TODO"
-# flow: "TODO"
+headless: false             # false mientras configuramos
+
+url: "https://www.us.fieldglass.cloud.sap/?next=%2Fmy_profile.do%3Fcf%3D1"
+
+# Campo usuario del login Fieldglass (solo deslogueado) → detecta sesión expirada.
+login_marker: "#usernameId_new"
+
+selectors:
+  user: "#usernameId_new"
+  pass: "#passwordId_new"
+  submit: "button[name='action']"
+
+flow: fieldglass
+
+# Time sheet semanal (Sun-Sat). Abre el que está en "Draft", Edit, llena la fila
+# ST/Hr (21010 - Product Engineering) de lun-vie, y Complete Later / Submit.
+# Submit es lo normal cada viernes (usa --submit). Los días salen de
+# [job:health_equity] del week_note (deben coincidir con Health Equity).
+fieldglass:
+  list_url: "https://www.us.fieldglass.cloud.sap/time_sheet_list.do?cf=1"
+  hours: "8"
