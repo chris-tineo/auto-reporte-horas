@@ -746,12 +746,16 @@ def fill_fieldglass(page, cfg: dict, log: logging.Logger, dry_run: bool,
         return
 
     if submit:
-        page.get_by_text("Submit", exact=True).first.click()
-        page.wait_for_timeout(4000)
-        log.info("Submit hecho.")
+        page.get_by_role("button", name="Submit", exact=True).first.click()  # bar -> abre diálogo
+        page.wait_for_selector("text=Submit Time Sheet", timeout=15000)
+        page.wait_for_timeout(1000)
+        # Al abrirse el diálogo, su Submit queda primero en el DOM (.first).
+        page.get_by_role("button", name="Submit", exact=True).first.click()
+        page.wait_for_timeout(5000)
+        log.info("Submit confirmado.")
     else:
         page.get_by_text("Complete Later", exact=False).first.click()
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(5000)
         log.info("Guardado como borrador (Complete Later).")
 
 
