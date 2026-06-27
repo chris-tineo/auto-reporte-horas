@@ -5,9 +5,9 @@
 
 name: kforce
 job: health_equity
-active: false               # activar cuando esté validado
+active: true                # validado (login + grid + fill ST/Hr lun-vie)
 auth: password
-headless: false             # false mientras configuramos
+headless: true              # headless renderiza el iframe del grid de forma fiable
 
 url: "https://www.us.fieldglass.cloud.sap/?next=%2Fmy_profile.do%3Fcf%3D1"
 

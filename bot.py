@@ -255,8 +255,10 @@ def do_password_login(page, cfg: dict, log: logging.Logger):
 
     # Login de un paso (selectores user/pass/submit).
     sel = cfg["selectors"]
+    _dismiss_trustarc(page)
     page.fill(sel["user"], get_credential(company, "user"))
     page.fill(sel["pass"], get_credential(company, "pass"))
+    _dismiss_trustarc(page)
     page.click(sel["submit"])
     try:
         page.wait_for_load_state("networkidle", timeout=15000)
@@ -288,6 +290,20 @@ def manual_login_flow(company: str):
         context.storage_state(path=str(session_path(company)))
         log.info(f"Sesión guardada en {session_path(company)}")
         browser.close()
+
+
+def _dismiss_trustarc(page):
+    """Descarta el banner de cookies TrustArc (intercepta clicks en Fieldglass)."""
+    for sel in ("#truste-consent-button", "button:has-text('Aceptar todo')",
+                "button:has-text('Accept All')"):
+        try:
+            b = page.query_selector(sel)
+            if b and b.is_visible():
+                b.click()
+                page.wait_for_timeout(800)
+                return
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _check_session(page, cfg: dict):
@@ -657,6 +673,7 @@ def fill_fieldglass(page, cfg: dict, log: logging.Logger, dry_run: bool,
     page.on("dialog", lambda d: d.accept())  # confirma diálogos (p. ej. al cancelar)
 
     page.wait_for_timeout(8000)   # deja cargar el nav tras el login
+    _dismiss_trustarc(page)
     _check_session(page, cfg)
     if not targets:
         log.warning("No hay días a llenar (revisa week_note.txt / rango).")
@@ -687,36 +704,32 @@ def fill_fieldglass(page, cfg: dict, log: logging.Logger, dry_run: bool,
     if "Draft" not in (page.query_selector("body").inner_text() or ""):
         raise RuntimeError("El time sheet abierto no está en Draft; abortando.")
 
+    _dismiss_trustarc(page)
     page.get_by_text("Edit", exact=True).first.click()
     page.wait_for_timeout(12000)
-    # buscar el frame con los inputs de horas (puede tardar en renderizar).
+    # buscar el frame del grid: el que tiene los inputs de horas (aria-label "enter time").
     frame = None
-    for i in range(15):
-        counts = []
+    for _ in range(15):
         for f in page.frames:
             try:
-                n = len(f.query_selector_all("input[title*='/']"))
-                counts.append((f.url[:40], n))
-                if n >= 5:
+                if f.query_selector("input[aria-label*='enter time']"):
                     frame = f
                     break
             except Exception:  # noqa: BLE001
                 pass
         if frame:
             break
-        if i in (0, 5, 10):
-            log.info(f"esperando form… frames={counts}")
         page.wait_for_timeout(2500)
     if frame is None:
         page.screenshot(path=str(LOGS_DIR / f"{cfg['_name']}_noform.png"))
         raise RuntimeError("No se encontró el form de edición de Fieldglass.")
 
     # ST/Hr = primer input de cada día (la fila ST va antes que OT en el DOM).
-    # Targeteo por fecha "D/M" del title (único dentro de una semana Sun-Sat).
+    # Targeteo por fecha "D/M" en el aria-label (único dentro de una semana Sun-Sat).
     filled = []
     for d, _ in targets:
         daystr = f"{d.day}/{d.month}"
-        inp = frame.locator(f"input[title*='{daystr}']").first
+        inp = frame.locator(f"input[aria-label*='{daystr}']").first
         inp.fill(hours)
         inp.dispatch_event("change")
         filled.append(d.isoformat())
@@ -725,9 +738,11 @@ def fill_fieldglass(page, cfg: dict, log: logging.Logger, dry_run: bool,
 
     if dry_run:
         page.screenshot(path=str(LOGS_DIR / f"{cfg['_name']}_dry.png"))
-        page.get_by_text("Cancel", exact=True).first.click()
-        page.wait_for_timeout(1500)
-        log.info("DRY-RUN: cancelado sin guardar.")
+        try:  # best-effort; al cerrar el navegador se descarta igual
+            page.get_by_text("Cancel", exact=True).first.click(timeout=5000)
+        except Exception:  # noqa: BLE001
+            pass
+        log.info("DRY-RUN: sin guardar (descartado).")
         return
 
     if submit:
