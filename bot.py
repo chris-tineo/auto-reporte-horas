@@ -292,6 +292,51 @@ def manual_login_flow(company: str):
         browser.close()
 
 
+def _launch_profile_context(p, cfg: dict):
+    """Persistent context sobre una COPIA del perfil de Chrome (auth: profile).
+    Chrome 136+ bloquea CDP sobre el 'User Data' real, por eso se usa una copia
+    dedicada (ver tools_taller_profile.py)."""
+    pcfg = cfg.get("profile", {})
+    user_data = str((BASE / pcfg.get("user_data_dir", "auth/taller_userdata")).resolve())
+    if not Path(user_data).exists():
+        raise RuntimeError(
+            f"No existe el perfil copiado en {user_data}. "
+            f"Corre primero: python bot.py --company {cfg['_name']} --login"
+        )
+    return p.chromium.launch_persistent_context(
+        user_data, channel=pcfg.get("channel", "chrome"),
+        headless=cfg.get("headless", False),
+        args=[f"--profile-directory={pcfg.get('profile_directory', 'Default')}"])
+
+
+def profile_login_flow(company: str):
+    """Login manual una vez sobre la copia del perfil (auth: profile).
+    Abre la ventana, espera a que el usuario entre al sistema y persiste la
+    sesión en el user-data-dir copiado."""
+    cfg = load_config(company)
+    log = setup_logger(company)
+    home = cfg["url"].split("/timesheets")[0].rstrip("/") + "/"
+    with sync_playwright() as p:
+        context = _launch_profile_context(p, cfg)
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(home, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(4000)
+        if "/login" in page.url:
+            print("\n" + "=" * 60)
+            print(f"  LOGIN MANUAL — {company} (perfil de Chrome)")
+            print("  Completa el login (Google + MFA) en la ventana.")
+            print("  Esperando a que entres al sistema…")
+            print("=" * 60)
+            for _ in range(160):  # ~4 min
+                page.wait_for_timeout(1500)
+                if page.url.startswith(home) and "/login" not in page.url:
+                    break
+        ok = page.url.startswith(home) and "/login" not in page.url
+        log.info("Sesión persistida en el perfil ✓" if ok
+                 else "No se detectó login; revisa la ventana.")
+        context.close()
+
+
 def _dismiss_trustarc(page):
     """Descarta el banner de cookies TrustArc (intercepta clicks en Fieldglass)."""
     for sel in ("#truste-consent-button", "button:has-text('Aceptar todo')",
@@ -760,6 +805,96 @@ def fill_fieldglass(page, cfg: dict, log: logging.Logger, dry_run: bool,
 
 
 # ---------------------------------------------------------------------------
+# Flujo quick_fill (Taller PSA: Quick Fill -> Apply, una semana de un golpe)
+# ---------------------------------------------------------------------------
+_MONTHS = {m: i for i, m in enumerate(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], start=1)}
+_WEEK_HDR = re.compile(r"([A-Z][a-z]{2})\s+(\d{1,2})\s*-\s*[A-Z][a-z]{2}\s+\d{1,2},\s*(\d{4})")
+
+
+def iso_mondays(start: date, end: date) -> list[date]:
+    """Lunes ISO únicos cuyas semanas (lun-vie) intersectan [start, end]."""
+    out: list[date] = []
+    d = start - timedelta(days=start.weekday())  # lunes de la semana de start
+    while d <= end:
+        out.append(d)
+        d += timedelta(days=7)
+    return out
+
+
+def _psa_week_monday(page) -> date | None:
+    """Lee el header 'Jun 22 - Jun 28, 2026' y devuelve el lunes mostrado."""
+    try:
+        txt = page.get_by_text(_WEEK_HDR).first.inner_text(timeout=4000)
+    except Exception:  # noqa: BLE001
+        txt = page.locator("body").inner_text()
+    m = _WEEK_HDR.search(txt)
+    if not m:
+        return None
+    mon, day, year = m.group(1), int(m.group(2)), int(m.group(3))
+    return date(year, _MONTHS[mon], day)
+
+
+def _nav_to_week(page, target: date, log: logging.Logger):
+    """Navega con las flechas ‹ › hasta la semana cuyo lunes es `target`."""
+    for _ in range(60):
+        cur = _psa_week_monday(page)
+        if cur is None:
+            raise RuntimeError("No pude leer el rango de fechas del timesheet.")
+        delta = (target - cur).days // 7
+        if delta == 0:
+            return
+        # Las flechas son los IconButtons hermanos del texto de fecha.
+        container = page.get_by_text(_WEEK_HDR).first.locator("xpath=..")
+        btns = container.locator("button.MuiIconButton-root")
+        (btns.first if delta < 0 else btns.nth(1)).click()
+        page.wait_for_timeout(1200)
+    raise RuntimeError(f"No llegué a la semana {target} navegando con flechas.")
+
+
+def fill_quick_fill(page, cfg: dict, log: logging.Logger, dry_run: bool,
+                    mondays: list[date]):
+    qf = cfg.get("quick_fill", {})
+    hours = qf.get("hours", 8)
+
+    page.goto(cfg["url"], wait_until="domcontentloaded")
+    page.wait_for_timeout(5000)
+    _check_session(page, cfg)
+
+    # Cerrar el modal recordatorio si aparece (solo la 1ª vez por sesión).
+    try:
+        page.get_by_role("button", name="Close").click(timeout=4000)
+        page.wait_for_timeout(800)
+    except Exception:  # noqa: BLE001
+        pass
+
+    for monday in mondays:
+        _nav_to_week(page, monday, log)
+        log.info(f"Semana {monday:%Y-%m-%d}: abriendo Quick Fill…")
+        page.get_by_role("button", name="Quick Fill").first.click(timeout=8000)
+        page.wait_for_timeout(1500)
+
+        # Defaults del form: Entry Type=Hours, lun-vie marcados. Solo ajustamos horas.
+        if hours != 8:
+            page.locator("input[placeholder='8']").first.fill(str(hours))
+
+        if dry_run:
+            log.info(f"DRY-RUN: Quick Fill listo ({hours}h lun-vie), NO se aplica.")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(800)
+            continue
+
+        page.get_by_role("button", name="Apply").first.click(timeout=8000)
+        page.wait_for_timeout(3500)
+        try:
+            banner = page.get_by_text(re.compile(r"Filled \d+ hours")).first.inner_text(timeout=5000)
+            log.info(f"Semana {monday:%Y-%m-%d}: {banner}")
+        except Exception:  # noqa: BLE001
+            log.warning(f"Semana {monday:%Y-%m-%d}: Apply hecho, sin banner de confirmación.")
+
+
+# ---------------------------------------------------------------------------
 # Runner por empresa
 # ---------------------------------------------------------------------------
 def run_company(company: str, dry_run: bool, note: dict,
@@ -775,21 +910,25 @@ def run_company(company: str, dry_run: bool, note: dict,
             targets = compute_targets(weeks_for(company, cfg, note), start, end, log)
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=cfg.get("headless", True))
-
-            if auth_mode == "session":
-                state = session_path(company)
-                if not state.exists():
-                    raise RuntimeError(
-                        f"No hay sesión guardada. Corre primero: "
-                        f"python bot.py --company {company} --login"
-                    )
-                context = browser.new_context(storage_state=str(state))
-                page = context.new_page()
-            else:  # password
-                context = browser.new_context()
-                page = context.new_page()
-                do_password_login(page, cfg, log)
+            browser = None
+            if auth_mode == "profile":
+                context = _launch_profile_context(p, cfg)
+                page = context.pages[0] if context.pages else context.new_page()
+            else:
+                browser = p.chromium.launch(headless=cfg.get("headless", True))
+                if auth_mode == "session":
+                    state = session_path(company)
+                    if not state.exists():
+                        raise RuntimeError(
+                            f"No hay sesión guardada. Corre primero: "
+                            f"python bot.py --company {company} --login"
+                        )
+                    context = browser.new_context(storage_state=str(state))
+                    page = context.new_page()
+                else:  # password
+                    context = browser.new_context()
+                    page = context.new_page()
+                    do_password_login(page, cfg, log)
 
             if flow == "modal_entries":
                 fill_modal_entries(page, cfg, log, dry_run, targets)
@@ -799,9 +938,12 @@ def run_company(company: str, dry_run: bool, note: dict,
                 fill_oracle_api(page, cfg, log, dry_run, targets, submit)
             elif flow == "fieldglass":
                 fill_fieldglass(page, cfg, log, dry_run, targets, submit)
+            elif flow == "quick_fill":
+                fill_quick_fill(page, cfg, log, dry_run, iso_mondays(start, end))
             else:
                 fill_timesheet(page, cfg, log, dry_run)
-            browser.close()
+
+            (browser or context).close()
 
         log.info("✓ OK")
         return True
@@ -861,7 +1003,10 @@ def main():
     if args.login:
         if not args.company:
             sys.exit("--login requiere --company")
-        manual_login_flow(args.company)
+        if load_config(args.company).get("auth") == "profile":
+            profile_login_flow(args.company)
+        else:
+            manual_login_flow(args.company)
         return
 
     if args.company:

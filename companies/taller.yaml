@@ -1,15 +1,34 @@
 # Taller Technologies — grupo de trabajo "health_equity".
-# Empresa que contrató a Christian y le PAGA mensualmente. Login con cuenta de Google
-# → sesión persistida. Accesible desde Internet → se automatiza desde este repo.
+# Empresa que contrató a Christian y le PAGA mensualmente. App PSA (Vercel) con
+# login Google SSO (cuenta christian.tineo@tallertechnologies.net).
 #
-# TODO (cuando arranquemos Taller): login manual una vez (Google) para guardar sesión,
-# inspeccionar el sistema, y fijar url / login_marker / flow / selectores.
+# Auth = "profile": se automatiza una COPIA del perfil de Chrome de Taller
+# (Profile 2) en auth/taller_userdata. Chrome 136+ bloquea CDP sobre el 'User
+# Data' real, por eso se usa una copia dedicada. Ver tools_taller_profile.py.
+#
+# 1) Una vez (login manual, Google + MFA, persiste en la copia del perfil):
+#       python bot.py --company taller --login
+# 2) Semanal (viernes): llena la semana ISO actual con 8h/día lun-vie.
+#       python bot.py --company taller
+#
+# Llenado = Quick Fill -> Apply (Entry Type=Hours, 8h, lun-vie son defaults;
+# Apply guarda en el backend, no hay Submit aparte).
 
 name: taller
 job: health_equity
-active: false               # activar cuando esté validado
-auth: session               # cuenta de Google (login manual una vez)
-headless: false
-# url: "TODO"
-# login_marker: "TODO"
-# flow: "TODO"
+active: true
+auth: profile
+headless: false             # SSO de Google no funciona headless
+flow: quick_fill
+url: "https://taller-psa.vercel.app/timesheets/individual"
+
+# Botón que solo existe en el login (detecta sesión expirada → pide --login).
+login_marker: "button:has-text('Sign in with Google')"
+
+profile:
+  user_data_dir: "auth/taller_userdata"   # copia de 'User Data' (Local State + Default)
+  profile_directory: "Default"
+  channel: "chrome"
+
+quick_fill:
+  hours: 8

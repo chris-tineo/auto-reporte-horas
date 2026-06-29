@@ -1,0 +1,14 @@
+# Datos fijos de la INVOICE a Taller (Quadriga, Inc dba Taller Technologies).
+# Formato en inglés, números europeos ("5.440,00"). N° de factura incrementa por mes.
+issuer:
+  name: "Christian Tineo"
+bill_to:
+  lines:
+    - "Quadriga, Inc dba Taller Technologies"
+    - "1 Sansome St, Ste. 1400"
+    - "San Francisco, CA 94104"
+    - "+1 415 590 4882 (USA)"
+rate: 34
+description: "Christian Tineo - Site Reliability Engineer - Kforce"
+next_invoice: 11        # mayo 2026 fue la 10
+number_format: european

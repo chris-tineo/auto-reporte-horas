@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 1.8cm 1.6cm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Arial', 'Segoe UI', sans-serif; color: #000; font-size: 10.5pt; }
+  .invoice-word { font-size: 40pt; font-weight: bold; color: #cfd8e3; letter-spacing: 1px; }
+  .name { font-size: 20pt; font-weight: bold; margin: 2px 0 0 0; }
+  table.meta { float: right; border-collapse: collapse; margin-top: 14px; }
+  table.meta td { padding: 3px 8px; font-size: 10.5pt; }
+  table.meta .lbl { text-align: right; font-weight: bold; }
+  table.meta .mos { background: #ffff00; font-weight: bold; }
+  .billto { clear: both; margin-top: 30px; }
+  .billto .h { font-weight: bold; margin-bottom: 4px; }
+  .billto p { margin: 0 0 2px 0; }
+  table.items { width: 100%; border-collapse: collapse; margin-top: 28px; }
+  table.items th, table.items td { border: 1px solid #b7b7b7; padding: 7px 9px; }
+  table.items thead th { background: #dde6f0; font-weight: bold; text-align: center; }
+  .c-desc { width: 55%; }
+  .c-hours { width: 12%; text-align: right; }
+  .c-rate  { width: 16%; }
+  .c-total { width: 17%; }
+  .money { display: flex; justify-content: space-between; }
+  td.empty { height: 26px; }
+  .total-row td { font-weight: bold; }
+  .total-row .lbl { text-align: right; border: 1px solid #b7b7b7; }
+  .note { margin-top: 26px; font-weight: bold; }
+</style>
+</head>
+<body>
+  <div class="invoice-word">INVOICE</div>
+  <table class="meta">
+    <tr><td class="lbl">DATE:</td><td>{{date}}</td></tr>
+    <tr><td class="lbl">INVOICE Nº:</td><td>{{invoice}}</td></tr>
+    <tr><td class="mos">MONTH OF SERVICE:</td><td>{{month}}</td></tr>
+  </table>
+  <div class="name">{{name}}</div>
+
+  <div class="billto">
+    <p class="h">Invoice to:</p>
+    {{bill_to_block}}
+  </div>
+
+  <table class="items">
+    <thead>
+      <tr>
+        <th class="c-desc">DESCRIPTION</th>
+        <th class="c-hours">HOURS</th>
+        <th class="c-rate">HOURLY RATE</th>
+        <th class="c-total">TOTAL US$</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="c-desc">{{description}}</td>
+        <td class="c-hours">{{hours}}</td>
+        <td class="c-rate"><div class="money"><span>$</span><span>{{rate}}</span></div></td>
+        <td class="c-total"><div class="money"><span>$</span><span>{{amount}}</span></div></td>
+      </tr>
+      <tr><td class="empty"></td><td></td><td></td><td></td></tr>
+      <tr><td class="empty"></td><td></td><td></td><td></td></tr>
+      <tr><td class="empty"></td><td></td><td></td><td></td></tr>
+      <tr><td class="empty"></td><td></td><td></td><td></td></tr>
+      <tr><td class="empty"></td><td></td><td></td><td></td></tr>
+      <tr class="total-row">
+        <td></td><td></td>
+        <td class="lbl">TOTAL</td>
+        <td class="c-total"><div class="money"><span>$</span><span>{{amount}}</span></div></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="note">NOTE:</p>
+</body>
+</html>
