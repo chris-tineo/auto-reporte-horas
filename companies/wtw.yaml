@@ -1,0 +1,10 @@
+# Willis Towers Watson (WTW) — grupo de trabajo "wtw".
+#
+# El timesheet de este grupo lo llena MANUALMENTE Jefry; Christian no hace nada
+# y el bot tampoco interviene. Es el grupo más sencillo: no requiere
+# automatización. Se documenta aquí solo para tener el mapa de grupos completo.
+
+name: wtw
+job: wtw
+active: false               # llenado manual por Jefry; el bot no interviene
+flow: external

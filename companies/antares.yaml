@@ -1,0 +1,13 @@
+# Antares — grupo de trabajo "antares". Recién iniciado (junio 2026).
+#
+# Christian todavía está aprendiendo cómo funciona el sistema de horas de este
+# grupo antes de automatizarlo. Skeleton: completar url / login_marker / flow /
+# auth cuando se conozca el sistema y se decida automatizarlo.
+
+name: antares
+job: antares
+active: false               # en aprendizaje; aún no automatizado
+# auth: "TODO"
+# url: "TODO"
+# login_marker: "TODO"
+# flow: "TODO"
