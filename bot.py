@@ -35,6 +35,8 @@ import yaml
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
+from notify import notify
+
 BASE = Path(__file__).parent
 COMPANIES_DIR = BASE / "companies"
 AUTH_DIR = BASE / "auth"
@@ -946,6 +948,13 @@ def run_company(company: str, dry_run: bool, note: dict,
             (browser or context).close()
 
         log.info("✓ OK")
+        if not dry_run:
+            notify(
+                title=f"✅ {company}: corrida OK",
+                body=f"Rango {start:%Y-%m-%d} → {end:%Y-%m-%d}.",
+                level="info",
+                data={"company": company},
+            )
         return True
 
     except (PWTimeout, RuntimeError, FileNotFoundError) as e:
@@ -959,24 +968,16 @@ def run_company(company: str, dry_run: bool, note: dict,
 
 
 # ---------------------------------------------------------------------------
-# Notificaciones (stub — completar con Telegram/correo)
+# Notificaciones — push vía Claudia (ver notify.py). Best-effort.
 # ---------------------------------------------------------------------------
 def notify_failure(company: str, msg: str):
-    """Hook para avisar de fallos. Implementa Telegram/correo aquí.
-    Ej. Telegram: requests.post(api_url, data={chat_id, text}). """
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat = os.getenv("TELEGRAM_CHAT_ID")
-    if not (token and chat):
-        return
-    try:
-        import requests
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat, "text": f"[timesheet-bot] {company} falló:\n{msg}"},
-            timeout=10,
-        )
-    except Exception:  # noqa: BLE001
-        pass
+    """Avisa de un fallo de corrida a Claudia (push). No lanza."""
+    notify(
+        title=f"❌ {company}: la corrida falló",
+        body=msg[:600],
+        level="error",
+        data={"company": company},
+    )
 
 
 # ---------------------------------------------------------------------------
