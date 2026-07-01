@@ -36,6 +36,7 @@ from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 import boleta
+import decisions
 import gform
 from notify import notify
 
@@ -198,6 +199,43 @@ def compute_targets(weeks: dict, start: date, end: date,
                 targets.append((d, entry["obs"]))
         d += timedelta(days=1)
     return targets
+
+
+def resolve_week_decisions(company: str, cfg: dict, note: dict,
+                           start: date, end: date, log: logging.Logger) -> dict:
+    """Round-trip de dudas: para las semanas de [start,end] SIN datos en week_note,
+    aplica la respuesta del usuario (vía Claudia) si existe, o crea una decisión
+    pendiente (idempotente por key). Devuelve el mapa de semanas aumentado.
+    Best-effort: si Claudia no responde, las semanas quedan sin datos (se omiten)."""
+    weeks_map = dict(weeks_for(company, cfg, note))
+    job = cfg.get("job")
+    ans = {d.get("key"): (d.get("id"), d.get("answer")) for d in decisions.answered()}
+    seen: set[tuple[int, int]] = set()
+    d = start
+    while d <= end:
+        if d.weekday() < 5 and (d.isocalendar()[0], d.isocalendar()[1]) not in seen:
+            y, w, _ = d.isocalendar()
+            seen.add((y, w))
+            if (y, w) in weeks_map:
+                d += timedelta(days=1)
+                continue
+            key = f"job:{job}:{y}-W{w:02d}"
+            if key in ans:
+                aid, answer = ans[key]
+                worked = {0, 1, 2, 3, 4} if answer == "Mon-Fri 8h" else set()
+                weeks_map[(y, w)] = {"worked": worked, "obs": ""}
+                decisions.mark_applied(aid)
+                log.info(f"Semana {y}-W{w:02d}: aplicada respuesta '{answer}'.")
+            else:
+                q = f"Semana {y}-W{w:02d} ({job}) sin datos en week_note. ¿Qué hago?"
+                ctx = json.dumps({"kind": "week_note", "job": job, "year": y, "week": w})
+                _, created = decisions.ask(key, q, ["Mon-Fri 8h", "Skip"], ctx)
+                if created:
+                    notify(title=f"❓ {company}: semana {y}-W{w:02d} sin datos",
+                           body=q, level="question", data={"company": company})
+                    log.info(f"Semana {y}-W{w:02d}: decisión pendiente creada.")
+        d += timedelta(days=1)
+    return weeks_map
 
 
 # ---------------------------------------------------------------------------
@@ -911,7 +949,8 @@ def run_company(company: str, dry_run: bool, note: dict,
 
         targets: list[tuple[date, str]] = []
         if flow in ("modal_entries", "weekly_grid", "oracle_api", "fieldglass"):
-            targets = compute_targets(weeks_for(company, cfg, note), start, end, log)
+            weeks_map = resolve_week_decisions(company, cfg, note, start, end, log)
+            targets = compute_targets(weeks_map, start, end, log)
 
         with sync_playwright() as p:
             browser = None
