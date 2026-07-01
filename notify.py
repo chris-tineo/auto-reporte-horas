@@ -60,6 +60,6 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(message)s")
     load_dotenv(Path(__file__).parent / ".env")
-    ok = notify("🔔 Test", "Notificación de prueba desde el bot de horas.", "info")
-    print("Enviada ✓" if ok else
-          "No enviada — revisa CLAUDIA_NOTIFY_URL/CLAUDIA_API_KEY o que Claudia esté arriba.")
+    ok = notify("Test", "Notificacion de prueba desde el bot de horas.", "info")
+    print("Enviada OK" if ok else
+          "No enviada - revisa CLAUDIA_NOTIFY_URL/CLAUDIA_API_KEY o que Claudia este arriba.")
