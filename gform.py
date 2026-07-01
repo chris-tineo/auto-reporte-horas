@@ -112,8 +112,13 @@ def submit_invoice(cfg: dict, pdf: str, month: str, amount: str,
                 log.info(f"Upload: {'OK' if uploaded else 'FALLÓ'} ({Path(pdf_path).name})")
                 if not uploaded:
                     raise RuntimeError("No pude subir el PDF al Picker de Drive.")
+            elif dry_run:
+                log.info("Upload: (dry-run) reusa el archivo del borrador.")
             else:
-                log.info("Upload: ya hay un archivo en el borrador (se reutiliza).")
+                # Fail-safe: no reenviar un PDF viejo del borrador sin querer.
+                raise RuntimeError(
+                    "Ya hay un archivo en el borrador del form; límpialo antes de enviar "
+                    "(o valida con --dry-run).")
 
             if form.get("register_email_checkbox", True):
                 kill_overlay()

@@ -35,6 +35,7 @@ import yaml
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
+import boleta
 import gform
 from notify import notify
 
@@ -971,6 +972,120 @@ def run_company(company: str, dry_run: bool, note: dict,
 # ---------------------------------------------------------------------------
 # Notificaciones — push vía Claudia (ver notify.py). Best-effort.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Orquestador mensual de Taller: horas del PSA -> boleta -> envío del form
+# ---------------------------------------------------------------------------
+_MONTH_NAMES = [calendar.month_name[i] for i in range(1, 13)]  # January..December
+_MONTH_HDR = re.compile(r"(" + "|".join(_MONTH_NAMES) + r")\s+(\d{4})")
+_MONTH_NUM = {m: i for i, m in enumerate(calendar.month_name) if m}
+
+
+def _psa_month(page) -> date | None:
+    """Lee el header 'June 2026' de la vista Month y devuelve el 1º de ese mes."""
+    try:
+        txt = page.get_by_text(_MONTH_HDR).first.inner_text(timeout=4000)
+    except Exception:  # noqa: BLE001
+        txt = page.locator("body").inner_text()
+    m = _MONTH_HDR.search(txt)
+    return date(int(m.group(2)), _MONTH_NUM[m.group(1)], 1) if m else None
+
+
+def read_taller_month_hours(cfg: dict, target: date, log: logging.Logger) -> float:
+    """Total Hours del mes desde el PSA de Taller (vista Month). Fuente de horas
+    para la boleta. Los feriados de Perú SÍ cuentan (solo se excluyen fines de
+    semana y feriados de EE.UU.); el PSA ya lo refleja."""
+    target_m = date(target.year, target.month, 1)
+    with sync_playwright() as p:
+        ctx = _launch_profile_context(p, cfg)
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        try:
+            page.goto(cfg["url"], wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
+            _check_session(page, cfg)
+            try:
+                page.get_by_role("button", name="Close").click(timeout=4000)
+                page.wait_for_timeout(800)
+            except Exception:  # noqa: BLE001
+                pass
+            page.get_by_role("button", name="Month", exact=True).first.click(timeout=8000)
+            page.wait_for_timeout(2500)
+            for _ in range(36):
+                cur = _psa_month(page)
+                if cur is None:
+                    raise RuntimeError("No pude leer el mes en el PSA.")
+                delta = (target_m.year - cur.year) * 12 + (target_m.month - cur.month)
+                if delta == 0:
+                    break
+                container = page.get_by_text(_MONTH_HDR).first.locator("xpath=..")
+                btns = container.locator("button.MuiIconButton-root")
+                (btns.first if delta < 0 else btns.nth(1)).click()
+                page.wait_for_timeout(1500)
+            else:
+                raise RuntimeError(f"No llegué al mes {target_m:%Y-%m} en el PSA.")
+            body = page.locator("body").inner_text()
+            m = re.search(r"(\d+(?:\.\d+)?)\s*Total Hours", body)
+            if not m:
+                raise RuntimeError("No pude leer 'Total Hours' del PSA.")
+            hours = float(m.group(1))
+            log.info(f"PSA {target_m:%Y-%m}: {hours:g}h")
+            return hours
+        finally:
+            ctx.close()
+
+
+def _bump_next_invoice(company: str, new_val: int):
+    """Actualiza next_invoice en boleta/<company>/config.yaml preservando comentarios."""
+    path = boleta._company_dir(company) / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    text = re.sub(r"(?m)^(next_invoice:\s*)\d+", rf"\g<1>{new_val}", text)
+    path.write_text(text, encoding="utf-8")
+
+
+def run_monthly_invoice(company: str, month: str, dry_run: bool) -> bool:
+    """Orquesta el invoice mensual: lee horas del PSA -> genera boleta -> envía al
+    form -> bump del nº. month = 'YYYY-MM'."""
+    log = setup_logger(company)
+    try:
+        cfg = load_config(company)
+        if "invoice_form" not in cfg or cfg.get("flow") != "quick_fill":
+            raise RuntimeError(f"{company} no soporta orquestador mensual de invoice.")
+        y, mo = (int(x) for x in month.split("-"))
+        hours = read_taller_month_hours(cfg, date(y, mo, 1), log)
+
+        bcfg = boleta.load_cfg(company)
+        rate = bcfg["rate"]
+        amount = hours * rate
+        amount_str = str(int(amount)) if amount == int(amount) else str(amount)
+        invoice = bcfg["next_invoice"]
+        month_name = calendar.month_name[mo]                 # "June"
+        token = month_name[:3].upper() + str(y)              # "JUN2026"
+        nm = date(y + 1, 1, 1) if mo == 12 else date(y, mo + 1, 1)  # 1º del mes sig.
+        pdf = BASE / f"Christian Tineo {token}.pdf"
+        boleta.make_boleta(pdf, boleta.fmt_date_es(nm.isoformat()), invoice, hours,
+                           bcfg["description"], company=company, month=month_name)
+        log.info(f"Boleta {token}: {hours:g}h x {rate} = {amount_str} (invoice #{invoice})")
+
+        gform.submit_invoice(cfg, str(pdf), token, amount_str, log, dry_run=dry_run)
+        if dry_run:
+            log.info("DRY-RUN: no se envió ni se avanzó el nº de invoice.")
+            return True
+
+        _bump_next_invoice(company, invoice + 1)
+        log.info("✓ OK")
+        notify(title=f"✅ {company}: invoice {token} enviada",
+               body=f"{hours:g}h x {rate} = {amount_str} · invoice #{invoice}",
+               level="info", data={"company": company})
+        return True
+    except (PWTimeout, RuntimeError, FileNotFoundError) as e:
+        log.error(f"✗ FALLÓ: {e}")
+        notify_failure(company, f"invoice mensual: {e}")
+        return False
+    except Exception as e:  # noqa: BLE001
+        log.exception(f"✗ Error inesperado: {e}")
+        notify_failure(company, f"invoice mensual: {e}")
+        return False
+
+
 def run_submit_invoice(company: str, pdf: str, month: str, amount: str,
                        dry_run: bool) -> bool:
     """Envía un PDF de invoice al Google Form de la empresa (ver gform.submit_invoice)."""
@@ -1025,6 +1140,9 @@ def main():
     ap.add_argument("--amount", help="Monto para el form, sin símbolos (con --submit-invoice).")
     ap.add_argument("--invoice-month", dest="invoice_month",
                     help="MONTH OF SERVICE del form, ej. JUN2026 (con --submit-invoice).")
+    ap.add_argument("--invoice-run", action="store_true", dest="invoice_run",
+                    help="Orquesta el invoice mensual (horas del PSA → boleta → form). "
+                         "Requiere --company y --month YYYY-MM.")
     ap.add_argument("--month", help="Rango = todo el mes, formato YYYY-MM.")
     ap.add_argument("--week", help="Rango = una semana ISO, formato YYYY-Www.")
     ap.add_argument("--from", dest="frm", help="Inicio del rango, YYYY-MM-DD.")
@@ -1047,6 +1165,12 @@ def main():
             sys.exit("--submit-invoice requiere --company --pdf --amount --invoice-month")
         ok = run_submit_invoice(args.company, args.pdf, args.invoice_month,
                                 args.amount, args.dry_run)
+        sys.exit(0 if ok else 1)
+
+    if args.invoice_run:
+        if not (args.company and args.month):
+            sys.exit("--invoice-run requiere --company y --month YYYY-MM")
+        ok = run_monthly_invoice(args.company, args.month, args.dry_run)
         sys.exit(0 if ok else 1)
 
     if args.company:
