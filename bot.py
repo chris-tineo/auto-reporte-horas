@@ -35,6 +35,7 @@ import yaml
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
+import gform
 from notify import notify
 
 BASE = Path(__file__).parent
@@ -970,6 +971,31 @@ def run_company(company: str, dry_run: bool, note: dict,
 # ---------------------------------------------------------------------------
 # Notificaciones — push vía Claudia (ver notify.py). Best-effort.
 # ---------------------------------------------------------------------------
+def run_submit_invoice(company: str, pdf: str, month: str, amount: str,
+                       dry_run: bool) -> bool:
+    """Envía un PDF de invoice al Google Form de la empresa (ver gform.submit_invoice)."""
+    log = setup_logger(company)
+    try:
+        cfg = load_config(company)
+        if "invoice_form" not in cfg:
+            raise RuntimeError(f"{company} no tiene bloque 'invoice_form' en su YAML.")
+        gform.submit_invoice(cfg, pdf, month, amount, log, dry_run=dry_run)
+        log.info("✓ OK")
+        if not dry_run:
+            notify(title=f"✅ {company}: invoice enviada",
+                   body=f"{month} · monto {amount} · {Path(pdf).name}",
+                   level="info", data={"company": company})
+        return True
+    except (PWTimeout, RuntimeError, FileNotFoundError) as e:
+        log.error(f"✗ FALLÓ: {e}")
+        notify_failure(company, f"invoice: {e}")
+        return False
+    except Exception as e:  # noqa: BLE001
+        log.exception(f"✗ Error inesperado: {e}")
+        notify_failure(company, f"invoice: {e}")
+        return False
+
+
 def notify_failure(company: str, msg: str):
     """Avisa de un fallo de corrida a Claudia (push). No lanza."""
     notify(
@@ -993,6 +1019,12 @@ def main():
                     help="Llena pero NO guarda (captura el modal por día).")
     ap.add_argument("--submit", action="store_true",
                     help="weekly_grid: tras Save, envía la semana (Submit Hours). Opt-in.")
+    ap.add_argument("--submit-invoice", action="store_true", dest="submit_invoice",
+                    help="Envía un PDF de invoice al Google Form de la empresa (--pdf/--amount/--invoice-month).")
+    ap.add_argument("--pdf", help="Ruta del PDF de invoice (con --submit-invoice).")
+    ap.add_argument("--amount", help="Monto para el form, sin símbolos (con --submit-invoice).")
+    ap.add_argument("--invoice-month", dest="invoice_month",
+                    help="MONTH OF SERVICE del form, ej. JUN2026 (con --submit-invoice).")
     ap.add_argument("--month", help="Rango = todo el mes, formato YYYY-MM.")
     ap.add_argument("--week", help="Rango = una semana ISO, formato YYYY-Www.")
     ap.add_argument("--from", dest="frm", help="Inicio del rango, YYYY-MM-DD.")
@@ -1009,6 +1041,13 @@ def main():
         else:
             manual_login_flow(args.company)
         return
+
+    if args.submit_invoice:
+        if not (args.company and args.pdf and args.amount and args.invoice_month):
+            sys.exit("--submit-invoice requiere --company --pdf --amount --invoice-month")
+        ok = run_submit_invoice(args.company, args.pdf, args.invoice_month,
+                                args.amount, args.dry_run)
+        sys.exit(0 if ok else 1)
 
     if args.company:
         companies = [args.company]

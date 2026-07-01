@@ -32,3 +32,15 @@ profile:
 
 quick_fill:
   hours: 8
+
+# Envío mensual del invoice (PDF) al Google Form de Taller. Usa el mismo perfil.
+#   python bot.py --company taller --submit-invoice \
+#       --pdf "Christian Tineo JUN2026.pdf" --month YYYY-MM  (via orquestador)
+# o directo: --invoice-month JUN2026 --amount 5440 --pdf "..."  [--dry-run]
+invoice_form:
+  url: "https://docs.google.com/forms/d/e/1FAIpQLSfxod5efhV3d9ZabYf7CY6aZY20gWAKjxy4V5fmv472gPruyQ/viewform?pli=1"
+  month_question: "Month/Year of Service"
+  amount_question: "Total Amount Invoiced"
+  reimbursement_question: "reimbursement"
+  reimbursement_value: "No"
+  register_email_checkbox: true
