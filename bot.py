@@ -241,6 +241,13 @@ def resolve_week_decisions(company: str, cfg: dict, note: dict,
 # ---------------------------------------------------------------------------
 # Rango de fechas (scope CLI)
 # ---------------------------------------------------------------------------
+def prev_month_str(today: date | None = None) -> str:
+    """Mes anterior como 'YYYY-MM' (para la tarea del día 1 que factura el mes cerrado)."""
+    first = (today or date.today()).replace(day=1)
+    prev = first - timedelta(days=1)
+    return f"{prev.year}-{prev.month:02d}"
+
+
 def scope_dates(month: str | None, week: str | None,
                 frm: str | None = None, to: str | None = None) -> tuple[date, date]:
     if frm or to:  # rango explícito (o un solo día si solo se da uno)
@@ -1207,9 +1214,11 @@ def main():
         sys.exit(0 if ok else 1)
 
     if args.invoice_run:
-        if not (args.company and args.month):
-            sys.exit("--invoice-run requiere --company y --month YYYY-MM")
-        ok = run_monthly_invoice(args.company, args.month, args.dry_run)
+        if not args.company:
+            sys.exit("--invoice-run requiere --company")
+        # Sin --month: el mes anterior (la tarea del día 1 factura el mes que cerró).
+        month = args.month or prev_month_str()
+        ok = run_monthly_invoice(args.company, month, args.dry_run)
         sys.exit(0 if ok else 1)
 
     if args.company:
