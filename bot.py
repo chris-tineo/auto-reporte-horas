@@ -302,9 +302,11 @@ def do_password_login(page, cfg: dict, log: logging.Logger):
         log.info("Login (multi-paso) enviado.")
         return
 
-    # Login de un paso (selectores user/pass/submit).
+    # Login de un paso (selectores user/pass/submit; opcional company).
     sel = cfg["selectors"]
     _dismiss_trustarc(page)
+    if sel.get("company") and cfg.get("company_login"):
+        page.fill(sel["company"], str(cfg["company_login"]))
     page.fill(sel["user"], get_credential(company, "user"))
     page.fill(sel["pass"], get_credential(company, "pass"))
     _dismiss_trustarc(page)
@@ -943,6 +945,43 @@ def fill_quick_fill(page, cfg: dict, log: logging.Logger, dry_run: bool,
             log.warning(f"Semana {monday:%Y-%m-%d}: Apply hecho, sin banner de confirmación.")
 
 
+def fill_springahead(page, cfg: dict, log: logging.Logger, dry_run: bool,
+                     mondays: list[date], submit: bool = False):
+    """Timecard semanal de SpringAhead (B5). Llena los días trabajados (por defecto
+    lun-vie, hday0-4) con 8:00 en la fila del proyecto y Save (o Submit con --submit).
+    Acota el llenado a la primera 'tr.timecardRow' para no dividir en varias filas."""
+    sa = cfg.get("springahead", {})
+    hours = str(sa.get("hours", "8:00"))
+    days = sa.get("days", [0, 1, 2, 3, 4])  # lun-vie
+    tpl = sa["timecard_url"]
+    m = re.search(r"userid=(\d+)", page.content())  # tras do_password_login
+    if not m:
+        raise RuntimeError("No pude leer el userid tras el login de SpringAhead.")
+    uid = m.group(1)
+    if submit and not dry_run:
+        page.on("dialog", lambda d: d.accept())  # confirmación del Submit
+
+    for monday in mondays:
+        page.goto(tpl.format(uid=uid, date=monday.strftime("%m/%d/%Y")),
+                  wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(4000)
+        _check_session(page, cfg)
+        row = page.locator("tr.timecardRow").first
+        for i in days:
+            row.locator(f"input[name='hday{i}']").fill(hours)
+        page.keyboard.press("Tab")   # blur del último input → dispara su change/total
+        page.wait_for_timeout(800)
+        if dry_run:
+            page.screenshot(path=str(LOGS_DIR / f"{cfg['_name']}_dry_{monday:%Y-%m-%d}.png"),
+                            full_page=True)
+            log.info(f"DRY-RUN semana {monday:%Y-%m-%d}: {len(days)} días @ {hours}, NO se guardó.")
+            continue
+        (page.get_by_text("Submit All", exact=True) if submit
+         else page.get_by_text("Save", exact=True)).first.click(timeout=8000)
+        page.wait_for_timeout(5000)
+        log.info(f"Semana {monday:%Y-%m-%d}: {'submit' if submit else 'save'} OK.")
+
+
 # ---------------------------------------------------------------------------
 # Runner por empresa
 # ---------------------------------------------------------------------------
@@ -990,6 +1029,8 @@ def run_company(company: str, dry_run: bool, note: dict,
                 fill_fieldglass(page, cfg, log, dry_run, targets, submit)
             elif flow == "quick_fill":
                 fill_quick_fill(page, cfg, log, dry_run, iso_mondays(start, end))
+            elif flow == "springahead":
+                fill_springahead(page, cfg, log, dry_run, iso_mondays(start, end), submit)
             else:
                 fill_timesheet(page, cfg, log, dry_run)
 

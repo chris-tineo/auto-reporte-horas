@@ -1,0 +1,38 @@
+# B5 (1Rivet / SpringAhead) — grupo de trabajo "antares".
+#
+# Empresa intermediaria de EE.UU. que presentó a Christian al cliente Antares.
+# Timesheet en SpringAhead (my.springahead.com). Login usuario/contraseña directo.
+#
+# Credenciales en .env (agrégalas TÚ; nunca se commitean):
+#   B5_USER=christian.tineo@1rivet.com
+#   B5_PASS=...
+#
+# El cliente Antares NO se automatiza desde esta máquina (ambiente privado);
+# eso lo maneja Christian en la máquina asignada. Ver antares.yaml.
+
+name: b5
+job: antares
+active: false               # en validación
+auth: password
+headless: true              # SpringAhead es un form clásico, headless anda bien
+flow: springahead
+url: "https://my.springahead.com/go/Account/Logon?ReturnUrl=%2Fvt%2Fgo%3FHome%26tokenid%3Dvte"
+
+# El campo Password solo existe deslogueado → detecta sesión expirada.
+login_marker: "#Password"
+
+# Código de empresa de SpringAhead (NO es secreto).
+company_login: "SIC Consulting"
+
+selectors:
+  company: "#CompanyLogin"     # SpringAhead pide "Company" además de user/pass
+  user: "#UserName"
+  pass: "#Password"
+  submit: "#submit"
+
+# Timecard semanal (Mon-Sun). Llena hday0-4 (lun-vie) a 8:00 en la fila del
+# proyecto y Save; Submit es opt-in (--submit). El userid se lee tras el login.
+springahead:
+  timecard_url: "https://my.springahead.com/vt/go?Timecard&tokenid=vte&userid={uid}&startDate={date}"
+  hours: "8:00"
+  days: [0, 1, 2, 3, 4]     # lun-vie (hday0..hday4)
